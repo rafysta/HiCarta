@@ -1,9 +1,0 @@
-# HiCarta configuration.  key = value  (lines starting with # are ignored)
-# Edit these and restart the app; the values become the default inputs.
-
-# Default Juicer sample menu (Hi-C .hic list) shown in the Data panel
-menu_url = https://uo-cgf.s3.us-west-2.amazonaws.com/P/020/juicer_020.txt
-
-# Default track list shown in the Tracks panel. May be a single IGV XML,
-# or an index file listing several IGV XML URLs (one per line).
-track_list_url = https://uo-cgf.s3.us-west-2.amazonaws.com/L/Noma/igv_data.txt

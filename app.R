@@ -39,8 +39,8 @@ read_config <- function(path) {
 }
 CFG <- read_config(file.path(getwd(), "config.txt"))
 cfg_or <- function(k, d) if (!is.null(CFG[[k]]) && nzchar(CFG[[k]])) CFG[[k]] else d
-DEFAULT_MENU_URL  <- cfg_or("menu_url",       "https://uo-cgf.s3.us-west-2.amazonaws.com/P/020/juicer_020.txt")
-DEFAULT_TRACKLIST <- cfg_or("track_list_url", "https://uo-cgf.s3.us-west-2.amazonaws.com/L/Noma/igv_data.txt")
+DEFAULT_MENU_URL  <- cfg_or("menu_url",       "")   # set in config.txt (see config.example.txt)
+DEFAULT_TRACKLIST <- cfg_or("track_list_url", "")   # set in config.txt (see config.example.txt)
 TRK_COLORS  <- c("darkblue", "steelblue", "firebrick", "red", "darkgreen",
                  "seagreen", "purple", "magenta", "orange", "goldenrod", "black", "grey40")
 COLOR_SWATCHES <- tags$div(id = "trk_swatches", style = "margin-bottom:6px;",

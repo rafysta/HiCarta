@@ -35,12 +35,14 @@ sample/                動作確認用データ
 
 ## 設定ファイル（config.txt）
 
-アプリと同じフォルダの `config.txt`（`key = value`）を起動時に読み、既定値として表示します。編集して再起動すると反映されます。
+`config.example.txt` を **`config.txt`** にコピーし（app.R と同じフォルダ）、自分の URL を記入して再起動します。`config.txt` は **git 管理外**なので、データURLがコミットされることはありません。`config.txt` が無くてもアプリは動作します（入力欄が空で始まるだけで、URL を貼るかローカル `.hic` を指定すれば使えます）。
 
 ```
-menu_url        = https://…/juicer_020.txt   # Data パネルの .hic メニュー既定
-track_list_url  = https://…/igv_data.txt      # Tracks パネルの既定
+menu_url        = <Juicer メニューの URL かローカルパス>   # Data パネルの .hic メニュー既定
+track_list_url  = <IGV XML か索引ファイルの URL>          # Tracks パネルの既定
 ```
+
+公開の *S. pombe* テスト用メニューは [sample/README.md](sample/README.md) に記載。
 
 `track_list_url` は、単一の IGV XML でも、複数の IGV XML の URL を1行ずつ並べた索引ファイルでも構いません。索引の場合、Tracks で「XML file」→「Category」→「Track」の順に選べます。
 

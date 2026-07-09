@@ -1,0 +1,21 @@
+# HiCarta configuration template.  key = value  (lines starting with # are ignored)
+#
+# HOW TO USE:
+#   1. Copy this file to  config.txt  (in the same folder as app.R)
+#   2. Fill in your own URLs below and remove the leading '#'
+#   3. Restart the app; these become the default inputs.
+#
+# config.txt is git-ignored, so your URLs stay local and are never committed.
+# The app also runs fine WITHOUT config.txt: the input fields simply start
+# empty, and you can paste a URL or load a local .hic file by hand.
+
+# Default Juicer menu (Hi-C .hic list) shown in the Data panel.
+# Accepts a URL or a local path to a juicer menu file
+# ("id = parent, label[, url]", root rows = samples).
+# A public S. pombe test menu is noted in sample/README.md.
+#menu_url = https://example.com/path/to/juicer_menu.txt
+
+# Default track list shown in the Tracks panel.
+# May be a single IGV XML, or an index file listing several IGV XML URLs
+# (one per line).
+#track_list_url = https://example.com/path/to/igv_data.txt

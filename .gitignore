@@ -2,6 +2,12 @@
 # Track source scripts, launchers, config, docs and small sample fixtures.
 # Exclude large downloaded caches, generated artifacts and backups.
 
+# Local configuration with private data URLs (copy config.example.txt -> config.txt)
+config.txt
+
+# Sample menu that points to collaborators' actual datasets (keep local only)
+sample/juicer_sample.txt
+
 # Downloaded .hic / bigWig cache (regenerated on demand, can be hundreds of MB)
 _hic_cache/
 

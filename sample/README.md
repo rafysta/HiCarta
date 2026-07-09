@@ -11,8 +11,8 @@ example `.hic` contact maps are fetched from the public menu (`menu_url` in
 | `bin_def_200bp.txt` | hic200 → `.hic` conversion | Maps 200 bp global bin indices to `(chromosome, start)`. Needed to convert hic200‑cpp `.txt.gz` maps. See [../docs/data-formats.md](../docs/data-formats.md). |
 | `cdc25-20min_HiC_Double-MHM_Bio2_BS.txt` | Border Strength track | Border Strength at 200 bp (`chr, start, end, BS, BS.norm, boundary, TADid, TAD`). |
 | `wt_HiC_Double_MHM_bio2_10kb_BS.txt` | Border Strength track | Border Strength at 10 kb. |
-| `juicer_sample.txt` | Data menu | Example Juicer menu (`id = parent, label[, url]`). |
 
-Public test contact maps and menu:
+Public test contact maps and menu (set this as `menu_url` in your `config.txt`
+to try the app quickly):
 <https://uo-cgf.s3.us-west-2.amazonaws.com/P/020/juicer_020.txt>
 (Juicer v8, *S. pombe* I/II/III).

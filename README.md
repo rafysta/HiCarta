@@ -95,16 +95,19 @@ hic200‑cpp raw maps (`.txt.gz`) are converted to `.hic` first (with
 
 ## Configuration
 
-`config.txt` (`key = value`, in the app folder) is read at startup and supplies
-default inputs:
+Copy **`config.example.txt`** to **`config.txt`** (same folder as `app.R`) and set
+your own URLs. `config.txt` is **git‑ignored**, so your data URLs stay local and
+are never committed. The app also runs **without** `config.txt` — the input fields
+simply start empty and you paste a URL or load a local `.hic` by hand.
 
 ```
-menu_url       = https://…/juicer_020.txt   # default .hic menu (Data panel)
-track_list_url = https://…/igv_data.txt     # default track list (Tracks panel)
+menu_url       = <URL or local path to a Juicer menu>   # default .hic menu (Data panel)
+track_list_url = <URL to an IGV XML or an index file>   # default track list (Tracks panel)
 ```
 
 `track_list_url` may be a single IGV XML or an index file listing several IGV XML
-URLs (one per line).
+URLs (one per line). A public *S. pombe* test menu is noted in
+[sample/README.md](sample/README.md).
 
 ---
 
