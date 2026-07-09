@@ -9,8 +9,7 @@ example `.hic` contact maps are fetched from the public menu (`menu_url` in
 |---|---|---|
 | `Schizosaccharomyces_pombe_all_chromosomes.gff3` | gene (GFF3) track | PomBase gene models. Parsed on first use and cached as `*.genes.rds` (git‑ignored). |
 | `bin_def_200bp.txt` | hic200 → `.hic` conversion | Maps 200 bp global bin indices to `(chromosome, start)`. Needed to convert hic200‑cpp `.txt.gz` maps. See [../docs/data-formats.md](../docs/data-formats.md). |
-| `cdc25-20min_HiC_Double-MHM_Bio2_BS.txt` | Border Strength track | Border Strength at 200 bp (`chr, start, end, BS, BS.norm, boundary, TADid, TAD`). |
-| `wt_HiC_Double_MHM_bio2_10kb_BS.txt` | Border Strength track | Border Strength at 10 kb. |
+| `example_border_strength_BS.txt` | Border Strength track | Border Strength (`chr, start, end, BS, BS.norm, boundary, TADid, TAD`). |
 
 Public test contact maps and menu (set this as `menu_url` in your `config.txt`
 to try the app quickly):
