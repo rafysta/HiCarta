@@ -1,0 +1,29 @@
+# ---- HiCarta .gitignore ----
+# Track source scripts, launchers, config, docs and small sample fixtures.
+# Exclude large downloaded caches, generated artifacts and backups.
+
+# Downloaded .hic / bigWig cache (regenerated on demand, can be hundreds of MB)
+_hic_cache/
+
+# Generated / parsed caches
+*.genes.rds
+*.sqlite
+*.sqlite-journal
+
+# Backups (editors, ad-hoc, log-repair tool)
+*.bak
+*~
+*.logrepair_bak_*
+
+# R session artifacts
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

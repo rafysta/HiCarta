@@ -1,0 +1,11 @@
+009_wt_HiC_Single_M = root, 009_wt_HiC_Single_M
+009_wt_HiC_Single_M_1 = 009_wt_HiC_Single_M, ICE.100kb, https://uo-cgf.s3.us-west-2.amazonaws.com/P/020/wt_HiC_Single_M/wt_HiC_Single_M_ICE.100kb.hic
+009_wt_HiC_Single_M_2 = 009_wt_HiC_Single_M, ICE.10kb, https://uo-cgf.s3.us-west-2.amazonaws.com/P/020/wt_HiC_Single_M/wt_HiC_Single_M_ICE.10kb.hic
+009_wt_HiC_Single_M_6 = 009_wt_HiC_Single_M, KR, https://uo-cgf.s3.us-west-2.amazonaws.com/P/020/wt_HiC_Single_M/wt_HiC_Single_M_KR.hic
+012_wt_HiC_Double_MHM = root, 012_wt_HiC_Double_MHM
+012_wt_HiC_Double_MHM_1 = 012_wt_HiC_Double_MHM, ICE.100kb, https://uo-cgf.s3.us-west-2.amazonaws.com/P/020/wt_HiC_Double_MHM/wt_HiC_Double_MHM_ICE.100kb.hic
+012_wt_HiC_Double_MHM_2 = 012_wt_HiC_Double_MHM, ICE.10kb, https://uo-cgf.s3.us-west-2.amazonaws.com/P/020/wt_HiC_Double_MHM/wt_HiC_Double_MHM_ICE.10kb.hic
+012_wt_HiC_Double_MHM_6 = 012_wt_HiC_Double_MHM, KR, https://uo-cgf.s3.us-west-2.amazonaws.com/P/020/wt_HiC_Double_MHM/wt_HiC_Double_MHM_KR.hic
+010_cut14_208_HiC_Single_M = root, 010_cut14_208_HiC_Single_M
+010_cut14_208_HiC_Single_M_1 = 010_cut14_208_HiC_Single_M, ICE.100kb, https://uo-cgf.s3.us-west-2.amazonaws.com/P/020/cut14_208_HiC_Single_M/cut14_208_HiC_Single_M_ICE.100kb.hic
+010_cut14_208_HiC_Single_M_2 = 010_cut14_208_HiC_Single_M, ICE.10kb, https://uo-cgf.s3.us-west-2.amazonaws.com/P/020/cut14_208_HiC_Single_M/cut14_208_HiC_Single_M_ICE.10kb.hic

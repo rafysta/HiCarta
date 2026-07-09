@@ -1,0 +1,49 @@
+site_name: HiCarta
+site_description: Interactive Hi-C contact map viewer (R + Shiny + Leaflet)
+site_author: Hideki Tanizawa
+site_url: https://rafysta.github.io/HiCarta/
+repo_url: https://github.com/rafysta/HiCarta
+repo_name: rafysta/HiCarta
+docs_dir: docs
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.top
+    - navigation.sections
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Installation: install.md
+  - Usage: usage.md
+  - Data formats: data-formats.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - attr_list
+  - pymdownx.details
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+
+plugins:
+  - search
