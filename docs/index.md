@@ -2,6 +2,8 @@
 
 **Interactive Hi-C contact map viewer** built with R + Shiny + Leaflet.
 
+![](images\overview.png)
+
 HiCarta lets you explore Hi-C contact maps like a web map — **drag to pan, scroll
 to zoom**. It streams only the tiles you are looking at, so it stays responsive on
 high‑resolution maps and large genomes, reads `.hic` files directly, and overlays
