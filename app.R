@@ -24,6 +24,7 @@ source("R/tiles.R",       local = TRUE)
 source("R/tracks.R",      local = TRUE)
 source("R/genes.R",       local = TRUE)
 source("R/borderstrength.R", local = TRUE)
+source("R/export.R",       local = TRUE)
 
 APP_VERSION <- "4.0 (2026-07)"
 
@@ -233,7 +234,7 @@ ui <- fluidPage(
   div(id = "topnav",
     tabsetPanel(id = "nav", type = "pills", selected = "Data",
       tabPanel("Data"), tabPanel("Region"), tabPanel("Display"),
-      tabPanel("Tracks"), tabPanel("Setting"), tabPanel("About"))),
+      tabPanel("Tracks"), tabPanel("Print"), tabPanel("Setting"), tabPanel("About"))),
   sidebarLayout(
     sidebarPanel(width = 3,
       conditionalPanel("input.nav == 'Data'",
@@ -274,6 +275,13 @@ ui <- fluidPage(
         actionButton("trk_clear", "Clear all", class = "btn-sm"),
         verbatimTextOutput("trk_status"),
         hr(), uiOutput("trk_list")),
+      conditionalPanel("input.nav == 'Print'",
+        h4("画像出力 / 印刷"),
+        p(tags$small("現在開いているマップから、指定した領域を画像またはPDFとして出力します。")),
+        actionButton("exp_open", "印刷プレビューを開く", class = "btn-primary btn-block"),
+        hr(),
+        helpText("送信先（プリンター / ファイル）、用紙サイズ、出力領域、",
+                 "座標メモリ・凡例・余白の有無をプレビュー画面で設定できます。")),
       conditionalPanel("input.nav == 'Setting'",
         fluidRow(
           column(6, numericInput("map_height", "Contact map height (px)", 720, min = 200, step = 20)),
@@ -326,7 +334,8 @@ server <- function(input, output, session) {
   rv <- reactiveValues(menu = NULL, msg = "Load a menu, pick a dataset, Open map.",
                        ov = NULL, ov_res = NULL, chr = NULL, chrlen = NULL,
                        tileURL = NULL, tracks = list(), trk_seq = 0, trk_bins = 1000,
-                       trk_msg = "")
+                       trk_msg = "",
+                       exp_key = NULL, exp_data = NULL, exp_msg = "")
   st <- new.env()   # tile-render state shared with the tile HTTP handler
 
   # ---- menu ----
@@ -705,6 +714,209 @@ server <- function(input, output, session) {
   }, ignoreInit = TRUE)
 
   output$status <- renderText(rv$msg)
+
+  # ---------------- image / print export (Print pill -> modal) ----------------
+  # Open the print-preview modal, pre-filled from the current view.
+  observeEvent(input$exp_open, {
+    if (is.null(st$path)) {
+      showNotification("先にマップを開いてください（Data → Open map）。", type = "warning")
+      return()
+    }
+    v <- input$map_view
+    cur_chr   <- if (!is.null(rv$chr)) rv$chr else input$chr
+    cur_start <- if (!is.null(v)) max(1, round(v$west)) else max(1, input$start)
+    cur_end   <- if (!is.null(v)) round(v$east)
+                 else if (!is.null(rv$chrlen)) min(rv$chrlen, input$end) else input$end
+    if (!is.finite(cur_end) || cur_end <= cur_start)
+      cur_end <- if (!is.null(rv$chrlen)) rv$chrlen else cur_start + 1e6
+    chr_choices <- tryCatch({
+      info <- strawr::readHicChroms(st$path)
+      cc <- info$name[!tolower(info$name) %in% c("all", "assembly")]
+      if (length(cc)) cc else c("I", "II", "III")
+    }, error = function(e) c("I", "II", "III"))
+    if (!cur_chr %in% chr_choices) chr_choices <- unique(c(cur_chr, chr_choices))
+    def_name <- sprintf("HiCarta_%s_%d-%d", cur_chr, round(cur_start), round(cur_end))
+
+    showModal(modalDialog(
+      title = "印刷プレビュー", size = "l", easyClose = FALSE,
+      fluidRow(
+        column(7,
+          tags$div(style = "border:1px solid #ddd; padding:4px; background:#fff;",
+            uiOutput("exp_preview_ui"))),
+        column(5,
+          radioButtons("exp_dest", "送信先",
+                       c("プリンター" = "printer", "ファイル" = "file"),
+                       selected = "file", inline = TRUE),
+          conditionalPanel("input.exp_dest == 'file'",
+            tags$label("出力フォルダ", style = "margin-bottom:4px;"),
+            tags$style(HTML(paste0(
+              "#exp_folder_row{display:flex; gap:6px; align-items:center;",
+              " margin-bottom:10px; width:100%; box-sizing:border-box;}",
+              "#exp_folder_row .form-group{margin-bottom:0;}",
+              "#exp_folder_row .exp-folder-input{flex:1 1 auto; min-width:0;}",
+              "#exp_folder_row .exp-folder-input .form-control{height:34px; width:100%;}",
+              "#exp_folder_row .btn{flex:0 0 auto; height:34px; padding:6px 10px;",
+              " white-space:nowrap;}"))),
+            div(id = "exp_folder_row",
+              div(class = "exp-folder-input", textInput("exp_folder", NULL, value = getwd())),
+              actionButton("exp_browse", "参照")),
+            textInput("exp_name", "ファイル名", value = def_name),
+            radioButtons("exp_fmt", "フォーマット",
+                         c("PDF" = "pdf", "画像 (PNG)" = "png"),
+                         selected = "pdf", inline = TRUE)),
+          tags$hr(style = "margin:8px 0;"),
+          selectInput("exp_paper", "用紙サイズ",
+                      c("A4 縦" = "a4p", "A4 横" = "a4l",
+                        "正方形" = "sq", "カスタム" = "custom"), selected = "a4p"),
+          fluidRow(
+            column(6, numericInput("exp_w", "幅 (mm)", 210, min = 10, step = 5)),
+            column(6, numericInput("exp_h", "高さ (mm)", 297, min = 10, step = 5))),
+          tags$hr(style = "margin:8px 0;"),
+          tags$b("出力領域"), tags$small("（Hi-C: 縦・横は同一範囲）"),
+          selectInput("exp_chr", "染色体", chr_choices, selected = cur_chr),
+          fluidRow(
+            column(6, numericInput("exp_start", "開始 (bp)", round(cur_start), min = 1)),
+            column(6, numericInput("exp_end", "終了 (bp)", round(cur_end), min = 1))),
+          tags$hr(style = "margin:8px 0;"),
+          checkboxInput("exp_ticks", "座標メモリを入れる", TRUE),
+          checkboxInput("exp_legend", "凡例を入れる", TRUE),
+          checkboxInput("exp_nomargin", "余白を空けない", FALSE),
+          if (length(rv$tracks) > 0)
+            checkboxInput("exp_tracks", "トラックも出力する", TRUE),
+          tags$hr(style = "margin:8px 0;"),
+          verbatimTextOutput("exp_status"))),
+      footer = tagList(
+        actionButton("exp_run", "実行", class = "btn-primary"),
+        modalButton("閉じる"))
+    ))
+    rv$exp_msg <- ""
+  })
+
+  # paper preset -> width/height (mm)
+  observeEvent(input$exp_paper, {
+    wh <- switch(input$exp_paper,
+                 a4p = c(210, 297), a4l = c(297, 210), sq = c(210, 210), NULL)
+    if (!is.null(wh)) {
+      updateNumericInput(session, "exp_w", value = wh[1])
+      updateNumericInput(session, "exp_h", value = wh[2])
+    }
+  }, ignoreInit = TRUE)
+
+  # "参照…" -> native folder chooser -> fill the 出力フォルダ field
+  observeEvent(input$exp_browse, {
+    start_dir <- if (!is.null(input$exp_folder) && nzchar(input$exp_folder))
+                   input$exp_folder else getwd()
+    d <- tryCatch(choose_folder_dialog(start_dir), error = function(e) NULL)
+    if (!is.null(d) && nzchar(d)) updateTextInput(session, "exp_folder", value = d)
+  })
+
+  # region matrix for export: re-read only when chr/start/end change (key-guarded)
+  export_mat <- reactive({
+    req(input$exp_chr, input$exp_start, input$exp_end)
+    if (is.null(st$path)) return(NULL)
+    s <- max(1, as.numeric(input$exp_start)); e <- as.numeric(input$exp_end)
+    if (!is.finite(s) || !is.finite(e) || e <= s) return(NULL)
+    key <- paste(st$path, input$exp_chr, s, e, st$norm)
+    if (!identical(rv$exp_key, key)) {
+      rv$exp_data <- tryCatch(
+        read_export_matrix(st, input$exp_chr, s, e),
+        error = function(err) { rv$exp_msg <- paste("読み込みエラー:", conditionMessage(err)); NULL })
+      rv$exp_key <- key
+    }
+    rv$exp_data
+  })
+
+  # scaled colour bounds so the export matches the on-screen tiles (which scale
+  # the global vmin/vmax by (res/ovres)^2 for the tile's resolution).
+  exp_bounds <- function(res) {
+    f    <- (res / (st$ovres %||% res))^2
+    vmax <- ((if (!is.null(st$vmax)) st$vmax else 1)) * f
+    vmin <- ((if (!is.null(st$vmin)) st$vmin else 0)) * f
+    list(vmin = vmin, vmax = vmax)
+  }
+
+  # Build stackable track closures for the export, drawn over the same x-range
+  # [s,e] as the map. Returns list() when tracks are off or none are added.
+  build_export_tracks <- function(s, e) {
+    if (!isTRUE(input$exp_tracks) || length(rv$tracks) == 0) return(list())
+    chr <- input$exp_chr; chrlen <- rv$chrlen; nbins <- rv$trk_bins
+    lapply(unname(rv$tracks), function(t) {
+      force(t)
+      list(height = as.numeric(t$height),
+           draw = function(mar) {
+             if (identical(t$type, "gene"))
+               plot_gene_track(read_genes(t$path), chr, s, e,
+                               chrlen = chrlen, name = t$name, color = t$color,
+                               mar = mar, frame = FALSE)
+             else if (identical(t$type, "BorderStrength"))
+               plot_bs_track(read_bs(t$path), chr, s, e,
+                             chrlen = chrlen, name = t$name, mar = mar,
+                             frame = FALSE, yscale = "axis")
+             else
+               plot_track(t, chr, s, e, chrlen = chrlen, nbins = nbins,
+                          mar = mar, frame = FALSE, yscale = "axis")
+           })
+    })
+  }
+
+  output$exp_preview_ui <- renderUI({
+    w <- input$exp_w %||% 210; h <- input$exp_h %||% 297
+    ph <- max(220, min(560, round(500 * as.numeric(h) / as.numeric(w))))
+    plotOutput("exp_preview", height = paste0(ph, "px"))
+  })
+
+  output$exp_preview <- renderPlot({
+    d <- export_mat(); req(d)
+    b <- exp_bounds(d$res)
+    s <- max(1, as.numeric(input$exp_start)); e <- as.numeric(input$exp_end)
+    draw_export_map(d$m, input$exp_chr, input$exp_start, input$exp_end,
+                    color = st$color %||% input$color, vmin = b$vmin, vmax = b$vmax,
+                    ticks = isTRUE(input$exp_ticks), legend = isTRUE(input$exp_legend),
+                    no_margin = isTRUE(input$exp_nomargin),
+                    tracks = build_export_tracks(s, e),
+                    map_weight = input$map_height %||% 720)
+  })
+
+  output$exp_status <- renderText(rv$exp_msg)
+
+  observeEvent(input$exp_run, {
+    d <- export_mat()
+    if (is.null(d)) { rv$exp_msg <- "出力領域を確認してください。"; return() }
+    b <- exp_bounds(d$res)
+    s <- max(1, as.numeric(input$exp_start)); e <- as.numeric(input$exp_end)
+    exp_tracks <- build_export_tracks(s, e)
+    mapw <- input$map_height %||% 720
+    draw_fn <- function()
+      draw_export_map(d$m, input$exp_chr, input$exp_start, input$exp_end,
+                      color = st$color %||% input$color, vmin = b$vmin, vmax = b$vmax,
+                      ticks = isTRUE(input$exp_ticks), legend = isTRUE(input$exp_legend),
+                      no_margin = isTRUE(input$exp_nomargin),
+                      tracks = exp_tracks, map_weight = mapw)
+    W <- input$exp_w %||% 210; H <- input$exp_h %||% 297
+
+    if (identical(input$exp_dest, "printer")) {
+      tryCatch({
+        tmp <- tempfile(fileext = ".pdf")
+        write_export_file(tmp, "pdf", W, H, draw_fn = draw_fn)
+        rv$exp_msg <- print_file(tmp)
+      }, error = function(e) rv$exp_msg <- paste("印刷エラー:", conditionMessage(e)))
+    } else {
+      folder <- input$exp_folder; if (is.null(folder) || !nzchar(folder)) folder <- getwd()
+      if (!dir.exists(folder))
+        tryCatch(dir.create(folder, recursive = TRUE, showWarnings = FALSE),
+                 error = function(e) NULL)
+      fmt  <- input$exp_fmt %||% "pdf"
+      ext  <- if (identical(fmt, "pdf")) ".pdf" else ".png"
+      name <- input$exp_name; if (is.null(name) || !nzchar(name)) name <- "HiCarta_export"
+      if (!grepl(paste0("\\", ext, "$"), tolower(name)))
+        name <- paste0(tools::file_path_sans_ext(name), ext)
+      file <- file.path(folder, name)
+      tryCatch({
+        write_export_file(file, fmt, W, H, draw_fn = draw_fn)
+        rv$exp_msg <- paste("保存しました:", file)
+      }, error = function(e) rv$exp_msg <- paste("保存エラー:", conditionMessage(e)))
+    }
+  })
 }
 
 shinyApp(ui, server)

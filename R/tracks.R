@@ -58,8 +58,9 @@ parse_igv_xml <- function(src) {
 # past the chromosome ends, so it stays aligned with the contact map); signal is
 # only drawn within [1, chrlen]. `nbins` = number of bins across the view.
 # spec$ymax > 0 fixes the vertical scale (else it auto-scales to the view).
-plot_track <- function(spec, chr, vstart, vend, chrlen = Inf, nbins = 1000) {
-  op <- par(mar = c(0.3, 0, 0.3, 0)); on.exit(par(op))
+plot_track <- function(spec, chr, vstart, vend, chrlen = Inf, nbins = 1000,
+                       mar = c(0.3, 0, 0.3, 0), frame = TRUE, yscale = "inline") {
+  op <- par(mar = mar); on.exit(par(op))
   dstart <- max(1, floor(vstart)); dend <- min(chrlen, ceiling(vend))
   gr <- if (dend > dstart) .track_import(spec$path, chr, dstart, dend) else NULL
   Wpx <- tryCatch(grDevices::dev.size("px")[1], error = function(e) 800)
@@ -99,11 +100,19 @@ plot_track <- function(spec, chr, vstart, vend, chrlen = Inf, nbins = 1000) {
     # name (top-left, larger) + a round score label at ~90% height on the right
     text(vstart + 0.005 * (vend - vstart), ymax * 1.0, spec$name,
          adj = c(0, 1), cex = 1.15, col = "grey20")
-    nice <- signif(ymax * 0.9, 1)
-    if (is.finite(nice) && nice > 0) {
-      segments(lx, nice, vstart + (1 - 4 / Wpx) * (vend - vstart), nice, col = "grey45")
-      text(lx, nice, sprintf("%.3g ", nice), adj = c(1, 0.5), cex = 1.0, col = "grey20")
+    if (identical(yscale, "axis")) {
+      # publication style: a real left Y-axis, ticks the SAME length (tcl) as the
+      # Hi-C map's axis so they match regardless of track height.
+      at <- pretty(c(0, ymax), 3); at <- at[at >= 0 & at <= ymax * 1.05]
+      axis(2, at = at, labels = formatC(at, format = "g", digits = 3), las = 1,
+           tcl = -0.4, mgp = c(3, 0.5, 0), cex.axis = 0.8, col = "grey40", col.axis = "grey20")
+    } else {
+      nice <- signif(ymax * 0.9, 1)
+      if (is.finite(nice) && nice > 0) {
+        segments(lx, nice, vstart + (1 - 4 / Wpx) * (vend - vstart), nice, col = "grey45")
+        text(lx, nice, sprintf("%.3g ", nice), adj = c(1, 0.5), cex = 1.0, col = "grey20")
+      }
     }
   }
-  box(col = "grey85")
+  if (isTRUE(frame)) box(col = "grey85")
 }

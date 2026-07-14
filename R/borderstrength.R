@@ -27,8 +27,9 @@ read_bs <- function(path) {
 
 # Draw the Border Strength track for chr:[vstart,vend]; x-axis matches the map.
 plot_bs_track <- function(df, chr, vstart, vend, chrlen = Inf, name = "BorderStrength",
-                          poscol = "#E4211C", negcol = "#2C6FBF") {
-  op <- par(mar = c(0.3, 0, 0.3, 0)); on.exit(par(op))
+                          poscol = "#E4211C", negcol = "#2C6FBF",
+                          mar = c(0.3, 0, 0.3, 0), frame = TRUE, yscale = "inline") {
+  op <- par(mar = mar); on.exit(par(op))
   vstart <- floor(vstart); vend <- ceiling(vend)
   sub <- df[df$chr == chr & df$end >= vstart & df$start <= vend, , drop = FALSE]
   fv <- sub$val[is.finite(sub$val)]
@@ -48,9 +49,15 @@ plot_bs_track <- function(df, chr, vstart, vend, chrlen = Inf, name = "BorderStr
   }
   abline(h = 0, col = "grey55", lwd = 0.7)
   text(vstart + 0.005 * (vend - vstart), ymax * 0.98, name, adj = c(0, 1), cex = 1.1, col = "grey20")
-  Wpx <- tryCatch(grDevices::dev.size("px")[1], error = function(e) 900)
-  nice <- signif(ymax, 2)
-  text(vstart + (1 - (66 + 6) / Wpx) * (vend - vstart), ymax * 0.9,
-       sprintf("%.3g ", nice), adj = c(1, 0.5), cex = 0.95, col = "grey30")
-  box(col = "grey85")
+  if (identical(yscale, "axis")) {
+    at <- pretty(c(-ymax, ymax), 3)
+    axis(2, at = at, labels = formatC(at, format = "g", digits = 3), las = 1,
+         tcl = -0.4, mgp = c(3, 0.5, 0), cex.axis = 0.8, col = "grey40", col.axis = "grey20")
+  } else {
+    Wpx <- tryCatch(grDevices::dev.size("px")[1], error = function(e) 900)
+    nice <- signif(ymax, 2)
+    text(vstart + (1 - (66 + 6) / Wpx) * (vend - vstart), ymax * 0.9,
+         sprintf("%.3g ", nice), adj = c(1, 0.5), cex = 0.95, col = "grey30")
+  }
+  if (isTRUE(frame)) box(col = "grey85")
 }

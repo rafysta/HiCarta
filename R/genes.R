@@ -73,8 +73,9 @@ read_genes <- function(path) {
 # Vertical layout (top -> bottom), as fractions of the track height:
 #   space 8 | + genes 20 | + names 20 | space 5 | - genes 20 | - names 20 | space 7
 plot_gene_track <- function(struct, chr, vstart, vend, chrlen = Inf,
-                            name = "genes", color = "grey20") {
-  op <- par(mar = c(0, 0, 0, 0)); on.exit(par(op))
+                            name = "genes", color = "grey20",
+                            mar = c(0, 0, 0, 0), frame = TRUE) {
+  op <- par(mar = mar); on.exit(par(op))
   vstart <- floor(vstart); vend <- ceiling(vend); span <- vend - vstart
   plot(NA, xlim = c(vstart, vend), ylim = c(0, 1), xaxs = "i", yaxs = "i",
        axes = FALSE, ann = FALSE)
@@ -89,7 +90,7 @@ plot_gene_track <- function(struct, chr, vstart, vend, chrlen = Inf,
 
   g <- struct$genes
   vis <- g[g$chr == chr & g$end >= vstart & g$start <= vend, , drop = FALSE]
-  if (nrow(vis) == 0) { box(col = "grey85"); return(invisible()) }
+  if (nrow(vis) == 0) { if (isTRUE(frame)) box(col = "grey85"); return(invisible()) }
   Wpx     <- tryCatch(grDevices::dev.size("px")[1], error = function(e) 900)
   showEx  <- span <= 3e5
   charbp  <- (7 / max(Wpx, 1)) * span   # approx width of one label character, in bp
@@ -126,5 +127,5 @@ plot_gene_track <- function(struct, chr, vstart, vend, chrlen = Inf,
   }
   draw_strand(vis[vis$strand == "+", , drop = FALSE], Bp_g, Bp_n, TRUE)
   draw_strand(vis[vis$strand == "-", , drop = FALSE], Bm_g, Bm_n, FALSE)
-  box(col = "grey85")
+  if (isTRUE(frame)) box(col = "grey85")
 }
