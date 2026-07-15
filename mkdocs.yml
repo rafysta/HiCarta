@@ -30,20 +30,48 @@ theme:
         icon: material/weather-sunny
         name: Switch to light mode
 
+# Nav references the DEFAULT-language folder (en/). The i18n plugin serves these
+# at the site root "/" and maps the same pages to "/ja/". Japanese nav labels
+# are set via nav_translations under the ja locale below.
 nav:
-  - Home: index.md
-  - Installation: install.md
-  - Usage: usage.md
-  - Data formats: data-formats.md
+  - Home: en/index.md
+  - Installation: en/install.md
+  - Usage: en/usage.md
+  - Data formats: en/data-formats.md
 
 markdown_extensions:
   - admonition
   - tables
   - attr_list
+  - md_in_html            # process Markdown inside HTML blocks (grid cards need this)
   - pymdownx.details
   - pymdownx.superfences
+  - pymdownx.emoji:        # render :material-...: icons as inline SVG
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - toc:
       permalink: true
 
 plugins:
   - search
+  # Multi-language docs. Japanese is the source (docs/ja/), English (docs/en/)
+  # is generated from it. English is the default, served at the site root "/";
+  # Japanese is served at "/ja/". A language switcher appears in the header.
+  # See TRANSLATING.md for the editing workflow.
+  - i18n:
+      docs_structure: folder
+      languages:
+        - locale: en
+          name: English
+          default: true
+          build: true
+        - locale: ja
+          name: 日本語
+          build: true
+          site_name: HiCarta
+          # Translate the nav labels (default-language titles -> Japanese).
+          nav_translations:
+            Home: ホーム
+            Installation: インストール
+            Usage: 使い方
+            Data formats: データ形式

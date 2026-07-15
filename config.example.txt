@@ -9,6 +9,13 @@
 # The app also runs fine WITHOUT config.txt: the input fields simply start
 # empty, and you can paste a URL or load a local .hic file by hand.
 
+# Interface language, chosen once at startup.
+#   en = English (default)
+#   ja = Japanese
+# Omit this line (or set en) for English. Set ja to run the whole interface
+# in Japanese. Extra languages can be added in R/i18n.R.
+#language = en
+
 # Default Juicer menu (Hi-C .hic list) shown in the Data panel.
 # Accepts a URL or a local path to a juicer menu file
 # ("id = parent, label[, url]", root rows = samples).

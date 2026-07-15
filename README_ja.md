@@ -40,7 +40,10 @@ sample/                動作確認用データ
 ```
 menu_url        = <Juicer メニューの URL かローカルパス>   # Data パネルの .hic メニュー既定
 track_list_url  = <IGV XML か索引ファイルの URL>          # Tracks パネルの既定
+language        = ja                                     # 画面の言語（en=英語[既定] / ja=日本語）
 ```
+
+`language` は起動時に一度だけ読まれます。既定は英語（`en`）で、`config.txt` に `language = ja` を書くとインターフェース全体が日本語になります。言語の追加は `R/i18n.R` に定義を足すだけです。
 
 公開の *S. pombe* テスト用メニューは [sample/README.md](sample/README.md) に記載。
 

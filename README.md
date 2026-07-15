@@ -103,7 +103,12 @@ simply start empty and you paste a URL or load a local `.hic` by hand.
 ```
 menu_url       = <URL or local path to a Juicer menu>   # default .hic menu (Data panel)
 track_list_url = <URL to an IGV XML or an index file>   # default track list (Tracks panel)
+language       = en                                     # interface language (en = English [default], ja = Japanese)
 ```
+
+`language` is read once at startup. It defaults to English (`en`); setting
+`language = ja` in `config.txt` switches the whole interface to Japanese. Extra
+languages can be added in `R/i18n.R`.
 
 `track_list_url` may be a single IGV XML or an index file listing several IGV XML
 URLs (one per line). A public *S. pombe* test menu is noted in
