@@ -54,6 +54,60 @@ parse_igv_xml <- function(src) {
   NULL
 }
 
+# Aggregate a bigWig into `nbins` equal bins across [start,end], returning one
+# value per bin. This mirrors what IGV does at wide zoom: instead of sampling a
+# single point per bin, every base in the bin contributes. We use rtracklayer's
+# summary(), which reads the bigWig's precomputed zoom-level summaries (the same
+# machinery IGV uses) so genome-wide views are both accurate and fast.
+#   type = "mean" -> average signal over the bin (IGV default)
+#   type = "max"  -> peak signal in the bin (peaks are not averaged away)
+# Uncovered bins become 0. Falls back to a raw import + proper overlap binning
+# (NOT point sampling) if summary() is unavailable for the file.
+.track_binned_signal <- function(path, chr, start, end, nbins, type = "mean") {
+  nbins <- max(2L, as.integer(nbins))
+  type  <- if (isTRUE(type %in% c("mean", "max"))) type else "mean"
+  cand  <- unique(c(chr, sub("^chr", "", chr), paste0("chr", chr)))
+
+  bwf <- tryCatch(rtracklayer::BigWigFile(path), error = function(e) NULL)
+  if (!is.null(bwf)) {
+    for (cc in cand) {
+      v <- tryCatch({
+        gr <- GenomicRanges::GRanges(cc, IRanges::IRanges(start, end))
+        s  <- rtracklayer::summary(bwf, which = gr, size = nbins,
+                                   type = type, defaultValue = 0)
+        out <- as.numeric(GenomicRanges::score(s[[1]]))
+        out[!is.finite(out)] <- 0
+        out
+      }, error = function(e) NULL)
+      if (!is.null(v) && length(v) == nbins) return(v)
+    }
+  }
+
+  # Fallback: read raw intervals and bin them by overlap (coverage-weighted mean
+  # over covered bases, or max), so gaps read as 0 rather than dropping peaks.
+  gr <- .track_import(path, chr, start, end)
+  val <- rep(0, nbins)
+  if (!is.null(gr) && length(gr) > 0) {
+    rs <- GenomicRanges::start(gr); re <- GenomicRanges::end(gr)
+    sv <- as.numeric(GenomicRanges::score(gr))
+    breaks <- seq(start, end, length.out = nbins + 1L)
+    for (i in seq_len(nbins)) {
+      b0 <- breaks[i]; b1 <- breaks[i + 1L]
+      ov <- which(re >= b0 & rs <= b1)
+      if (length(ov) == 0) next
+      if (identical(type, "max")) {
+        val[i] <- suppressWarnings(max(sv[ov], na.rm = TRUE))
+      } else {
+        w <- pmin(re[ov], b1) - pmax(rs[ov], b0) + 1
+        w[w < 0] <- 0
+        val[i] <- if (sum(w) > 0) sum(sv[ov] * w, na.rm = TRUE) / sum(w) else 0
+      }
+    }
+    val[!is.finite(val)] <- 0
+  }
+  val
+}
+
 # Draw one track. The x-axis spans the FULL map view [vstart,vend] (which may run
 # past the chromosome ends, so it stays aligned with the contact map); signal is
 # only drawn within [1, chrlen]. `nbins` = number of bins across the view.
@@ -62,7 +116,10 @@ plot_track <- function(spec, chr, vstart, vend, chrlen = Inf, nbins = 1000,
                        mar = c(0.3, 0, 0.3, 0), frame = TRUE, yscale = "inline") {
   op <- par(mar = mar); on.exit(par(op))
   dstart <- max(1, floor(vstart)); dend <- min(chrlen, ceiling(vend))
-  gr <- if (dend > dstart) .track_import(spec$path, chr, dstart, dend) else NULL
+  # BED needs the raw intervals; bigWig is aggregated from zoom levels below, so
+  # we avoid the expensive genome-wide raw import for it.
+  gr <- if (identical(spec$type, "BED") && dend > dstart)
+          .track_import(spec$path, chr, dstart, dend) else NULL
   Wpx <- tryCatch(grDevices::dev.size("px")[1], error = function(e) 800)
   gutfrac <- (66 + 8) / Wpx                     # keep labels left of the y-ruler gutter
   lx <- vstart + (1 - gutfrac) * (vend - vstart)
@@ -79,21 +136,17 @@ plot_track <- function(spec, chr, vstart, vend, chrlen = Inf, nbins = 1000,
          adj = c(0, 1), cex = 1.15, col = "grey20")
   } else {
     nbins   <- max(2L, as.integer(nbins))
-    centers <- seq(dstart, dend, length.out = nbins)
-    val <- rep(0, nbins)
-    if (!is.null(gr) && length(gr) > 0) {
-      rs <- GenomicRanges::start(gr); re <- GenomicRanges::end(gr)
-      sv <- GenomicRanges::score(gr)
-      idx <- findInterval(centers, rs)
-      inside <- idx >= 1 & idx <= length(rs) & centers <= re[pmax(idx, 1)]
-      val[inside] <- sv[idx[inside]]
-    }
+    agg     <- if (!is.null(spec$agg) && spec$agg %in% c("mean", "max")) spec$agg else "mean"
+    binw    <- (dend - dstart) / nbins
+    centers <- dstart + (seq_len(nbins) - 0.5) * binw   # true bin centers
+    val <- if (dend > dstart)
+             .track_binned_signal(spec$path, chr, dstart, dend, nbins, agg)
+           else rep(0, nbins)
     ymax <- if (!is.null(spec$ymax) && is.finite(spec$ymax) && spec$ymax > 0) spec$ymax
             else { m <- suppressWarnings(max(val, na.rm = TRUE)); if (!is.finite(m) || m <= 0) 1 else m }
     plot(NA, xlim = c(vstart, vend), ylim = c(0, ymax * 1.05),
          xaxs = "i", yaxs = "i", axes = FALSE, ann = FALSE)
     if (dend > dstart) {
-      binw <- (dend - dstart) / nbins
       rect(centers - binw / 2, 0, centers + binw / 2, pmin(val, ymax),
            col = spec$color, border = NA)
     }

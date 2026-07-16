@@ -17,6 +17,10 @@ suppressWarnings(suppressMessages({
   library(shiny); library(leaflet); library(htmlwidgets); library(base64enc)
 }))
 
+# shinyFiles powers the native file-picker dialog for the local .hic path. It is
+# optional: if it is not installed the app still runs and the path can be typed.
+HAS_SHINYFILES <- requireNamespace("shinyFiles", quietly = TRUE)
+
 source("R/i18n.R",        local = TRUE)
 source("R/readers.R",     local = TRUE)
 source("R/juicer_menu.R", local = TRUE)
@@ -230,6 +234,18 @@ function(el, x) {
     window._scale = msg.scale;
     map.fitBounds([[toLat(msg.fx1), toLng(msg.fx0)],[toLat(msg.fx0), toLng(msg.fx1)]]);
   });
+  Shiny.addCustomMessageHandler('panView', function(msg){
+    if(!map._loaded) return;
+    var s = map.getSize();                       // pan by a fraction of the view
+    map.panBy([msg.fx * s.x, msg.fy * s.y], {animate: true});
+  });
+  Shiny.addCustomMessageHandler('viewWhole', function(msg){
+    map.fitBounds([[toLat(msg.chrlen), toLng(0)],[toLat(0), toLng(msg.chrlen)]]);
+  });
+  Shiny.addCustomMessageHandler('gotoView', function(msg){
+    // jump to a saved 2-D region (x = genomic X, y = genomic Y)
+    map.fitBounds([[toLat(msg.y1), toLng(msg.x0)],[toLat(msg.y0), toLng(msg.x1)]]);
+  });
   Shiny.addCustomMessageHandler('setMapHeight', function(msg){
     var c = map.getContainer();
     c.style.height = msg.h + 'px';
@@ -255,6 +271,11 @@ function(el, x) {
     report(); drawRulers();
     Shiny.setInputValue('auto_map_height', h, {priority: 'event'});
   });
+  Shiny.addCustomMessageHandler('closeLoader', function(msg){
+    Shiny.setInputValue('loader_open', false, {priority: 'event'});
+    var b = document.getElementById('open_loader_btn');
+    if (b) b.classList.remove('active');
+  });
 }
 "
 
@@ -271,57 +292,162 @@ ui <- function(request) {
   fluidPage(
   tags$head(tags$style(HTML(
     ".leaflet-container{background:#fff}", ".nav-pills>li>a{padding:6px 14px}",
-    "#topnav{margin-bottom:8px}"))),
+    "#topnav{margin-bottom:8px; display:flex; align-items:center; gap:12px}",
+    # dark backdrop + centered white box for the data-loading overlay ("modal")
+    ".loader-overlay{position:fixed; inset:0; background:rgba(0,0,0,0.45);",
+    "  z-index:1050; display:flex; align-items:flex-start; justify-content:center}",
+    ".loader-box{background:#fff; margin-top:56px; width:700px; max-width:92vw;",
+    "  max-height:86vh; overflow:auto; border-radius:8px; padding:16px 22px 22px;",
+    "  box-shadow:0 10px 40px rgba(0,0,0,0.35)}",
+    ".loader-head{display:flex; justify-content:space-between; align-items:center;",
+    "  margin:-4px 0 10px}",
+    ".loader-head .ttl{font-size:18px; font-weight:600}",
+    ".loader-x{border:none; background:none; font-size:20px; line-height:1;",
+    "  cursor:pointer; color:#777; padding:2px 8px}",
+    ".loader-x:hover{color:#222}",
+    # data button: styled like an (unselected) nav pill — white until active
+    ".loader-btn{background:#fff; color:#337ab7; border:1px solid transparent;",
+    "  border-radius:4px; padding:6px 14px; font-weight:400}",
+    ".loader-btn:hover{background:#eee; color:#337ab7}",
+    ".loader-btn.active{background:#337ab7; color:#fff}",
+    ".pan-pad .btn{width:44px; padding:4px 0; font-size:14px}",
+    ".pan-pad .btn.home{color:#337ab7}"))),
   titlePanel("HiCarta"),
   div(id = "topnav",
-    tabsetPanel(id = "nav", type = "pills", selected = "Data",
-      tabPanel(tr("nav_data"),    value = "Data"),
+    # single entry point for all data loading (opens the overlay below)
+    tags$button(id = "open_loader_btn", type = "button", class = "btn loader-btn",
+      onclick = paste0("Shiny.setInputValue('loader_open', true, {priority:'event'});",
+                       "this.classList.add('active');"),
+      HTML("&#128194; "), tr("nav_data")),
+    tabsetPanel(id = "nav", type = "pills", selected = "Region",
       tabPanel(tr("nav_region"),  value = "Region"),
       tabPanel(tr("nav_display"), value = "Display"),
-      tabPanel(tr("nav_tracks"),  value = "Tracks"),
       tabPanel(tr("nav_print"),   value = "Print"),
       tabPanel(tr("nav_setting"), value = "Setting"),
       tabPanel(tr("nav_about"),   value = "About"))),
+
+  # ---- data-loading overlay ("modal"): Hi-C + track loading in two tabs. ----
+  # It is always in the DOM (so menu/sample selections survive close/reopen) and
+  # only shown when input.loader_open is true.
+  conditionalPanel("input.loader_open == true",
+    div(class = "loader-overlay",
+      div(class = "loader-box",
+        div(class = "loader-head",
+          tags$span(class = "ttl", tr("data_loader_title")),
+          tags$button(type = "button", class = "loader-x", title = tr("data_loader_close"),
+            onclick = paste0("Shiny.setInputValue('loader_open', false, {priority:'event'});",
+                             "var b=document.getElementById('open_loader_btn');",
+                             "if(b) b.classList.remove('active');"),
+            HTML("&#10005;"))),
+        tabsetPanel(id = "loader_tab", type = "tabs",
+          tabPanel(tr("data_loader_hic"),
+            div(style = "padding-top:12px;",
+              fileInput("menu_file", tr("data_menu_file"), accept = ".txt"),
+              textInput("menu_url", tr("data_menu_url"), value = DEFAULT_MENU_URL),
+              actionButton("load_menu", tr("data_load_menu"), class = "btn-sm"),
+              hr(),
+              selectInput("sample_sel", tr("data_sample"), NULL),
+              selectInput("dataset_sel", tr("data_dataset"), NULL),
+              selectInput("normalization", tr("data_norm"), c("NONE"), "NONE"),
+              hr(),
+              tags$b(tr("data_local_hic")),
+              textInput("hic_local", tr("data_hic_path"), ""),
+              if (HAS_SHINYFILES)
+                shinyFiles::shinyFilesButton("hic_file_btn", tr("data_hic_browse"),
+                                             tr("data_hic_browse_title"),
+                                             multiple = FALSE, class = "btn-sm"),
+              hr(),
+              actionButton("open", tr("data_open"), class = "btn-primary btn-block"),
+              verbatimTextOutput("status"))),
+          tabPanel(tr("nav_tracks"),
+            div(style = "padding-top:12px;",
+              textInput("trk_xml", tr("trk_xml_url"), value = DEFAULT_TRACKLIST),
+              actionButton("trk_xml_load", tr("trk_load"), class = "btn-sm"),
+              selectInput("trk_xmlfile", tr("trk_xmlfile"), NULL),
+              selectInput("trk_xml_cat", tr("trk_category"), NULL),
+              selectInput("trk_xml_sel", tr("trk_from_xml"), NULL),
+              hr(),
+              textInput("trk_path", tr("trk_or_path"), ""),
+              if (HAS_SHINYFILES)
+                shinyFiles::shinyFilesButton("trk_file_btn", tr("trk_browse"),
+                                             tr("trk_browse_title"),
+                                             multiple = FALSE, class = "btn-sm"),
+              selectInput("trk_type", tr("trk_type"),
+                          setNames(c("bigWig", "BED", "gene", "BorderStrength"),
+                                   c("bigWig", "BED", tr("trk_type_gene"), tr("trk_type_bs")))),
+              textInput("trk_name", tr("trk_label"), ""),
+              tags$label(tr("trk_color")), COLOR_SWATCHES,
+              numericInput("trk_height", tr("trk_height"), 90, min = 30, step = 10),
+              actionButton("trk_add", tr("trk_add"), class = "btn-sm btn-primary"),
+              actionButton("trk_clear", tr("trk_clear"), class = "btn-sm"),
+              verbatimTextOutput("trk_status"),
+              hr(), uiOutput("trk_list"))),
+          # -- save / restore the whole display state as a JSON session file --
+          tabPanel(tr("session_tab"),
+            div(style = "padding-top:12px;",
+              tags$p(tags$small(tr("session_help"))),
+              downloadButton("session_save", tr("session_save"), class = "btn-sm btn-primary"),
+              hr(),
+              fileInput("session_file", tr("session_load"), accept = ".json"))))))),
+
   sidebarLayout(
     sidebarPanel(width = 3,
-      conditionalPanel("input.nav == 'Data'",
-        fileInput("menu_file", tr("data_menu_file"), accept = ".txt"),
-        textInput("menu_url", tr("data_menu_url"), value = DEFAULT_MENU_URL),
-        actionButton("load_menu", tr("data_load_menu"), class = "btn-sm"),
-        hr(),
-        selectInput("sample_sel", tr("data_sample"), NULL),
-        selectInput("dataset_sel", tr("data_dataset"), NULL),
-        selectInput("normalization", tr("data_norm"), c("NONE"), "NONE"),
-        hr(),
-        tags$b(tr("data_local_hic")),
-        textInput("hic_local", tr("data_hic_path"), ""),
-        hr(), verbatimTextOutput("status")),
       conditionalPanel("input.nav == 'Region'",
         selectInput("chr", tr("region_chr"), c("I", "II", "III"), "II"),
         fluidRow(column(6, numericInput("start", tr("region_ystart"), 1)),
                  column(6, numericInput("end", tr("region_yend"), 1000000))),
-        actionButton("goto", tr("region_goto"), class = "btn-sm btn-primary")),
-      conditionalPanel("input.nav == 'Display'",
-        selectInput("color", tr("disp_palette"), c("matlab", "gentle", "red", "blue")),
-        uiOutput("scale_controls")),
-      conditionalPanel("input.nav == 'Tracks'",
-        textInput("trk_xml", tr("trk_xml_url"), value = DEFAULT_TRACKLIST),
-        actionButton("trk_xml_load", tr("trk_load"), class = "btn-sm"),
-        selectInput("trk_xmlfile", tr("trk_xmlfile"), NULL),
-        selectInput("trk_xml_cat", tr("trk_category"), NULL),
-        selectInput("trk_xml_sel", tr("trk_from_xml"), NULL),
+        actionButton("goto", tr("region_goto"), class = "btn-sm btn-primary"),
         hr(),
-        textInput("trk_path", tr("trk_or_path"), ""),
-        selectInput("trk_type", tr("trk_type"),
-                    setNames(c("bigWig", "BED", "gene", "BorderStrength"),
-                             c("bigWig", "BED", tr("trk_type_gene"), tr("trk_type_bs")))),
-        textInput("trk_name", tr("trk_label"), ""),
-        tags$label(tr("trk_color")), COLOR_SWATCHES,
-        numericInput("trk_height", tr("trk_height"), 90, min = 30, step = 10),
-        actionButton("trk_add", tr("trk_add"), class = "btn-sm btn-primary"),
-        actionButton("trk_clear", tr("trk_clear"), class = "btn-sm"),
-        verbatimTextOutput("trk_status"),
-        hr(), uiOutput("trk_list")),
+        tags$label(tr("region_nav")),
+        # how far each button moves, as a fraction of the visible view
+        radioButtons("pan_step", tr("region_step"),
+                     choices = setNames(c("0.25", "0.5", "1"), c("¼", "½", "1")),
+                     selected = "0.5", inline = TRUE),
+        # 8-direction pad incl. diagonals (Hi-C's diagonal runs ↖–↘); the
+        # center resets to the whole chromosome. Up/Down move along the Y axis.
+        div(class = "pan-pad", style = "max-width:150px; margin:2px 0 8px;",
+          div(style = "display:flex; gap:4px; justify-content:center; margin-bottom:4px;",
+            actionButton("pan_ul", HTML("&#8598;"), class = "btn-sm", title = tr("region_pan_ul")),
+            actionButton("pan_up", HTML("&#9650;"), class = "btn-sm", title = tr("region_pan_up")),
+            actionButton("pan_ur", HTML("&#8599;"), class = "btn-sm", title = tr("region_pan_ur"))),
+          div(style = "display:flex; gap:4px; justify-content:center; margin-bottom:4px;",
+            actionButton("pan_left",   HTML("&#9664;"), class = "btn-sm", title = tr("region_pan_left")),
+            actionButton("view_whole", HTML("&#8962;"), class = "btn-sm home", title = tr("region_whole")),
+            actionButton("pan_right",  HTML("&#9654;"), class = "btn-sm", title = tr("region_pan_right"))),
+          div(style = "display:flex; gap:4px; justify-content:center;",
+            actionButton("pan_dl", HTML("&#8601;"), class = "btn-sm", title = tr("region_pan_dl")),
+            actionButton("pan_down", HTML("&#9660;"), class = "btn-sm", title = tr("region_pan_down")),
+            actionButton("pan_dr", HTML("&#8600;"), class = "btn-sm", title = tr("region_pan_dr")))),
+        hr(),
+        # bookmarks: star the current view, jump back to it later
+        tags$label(tr("bm_title")),
+        textInput("bm_name", NULL, placeholder = tr("bm_name_ph")),
+        actionButton("bm_add", HTML(paste0("&#9733; ", tr("bm_add"))),
+                     class = "btn-sm btn-primary"),
+        uiOutput("bookmark_list")),
+      conditionalPanel("input.nav == 'Display'",
+        tabsetPanel(id = "disp_tab", type = "tabs",
+          # -- contact-map display: palette, value scale, map height --
+          tabPanel(tr("disp_tab_map"),
+            div(style = "padding-top:12px;",
+              selectInput("color", tr("disp_palette"), c("matlab", "gentle", "red", "blue")),
+              uiOutput("scale_controls"),
+              hr(),
+              fluidRow(
+                column(6, numericInput("map_height", tr("set_map_height"), 720, min = 200, step = 20)),
+                column(6, div(style = "margin-top:25px;",
+                              actionButton("fit_map", tr("set_fit"), class = "btn-sm")))),
+              actionButton("apply_map", tr("set_apply"), class = "btn-sm btn-primary"))),
+          # -- track display: resolution + per-track name/color/height/max/agg --
+          tabPanel(tr("nav_tracks"),
+            div(style = "padding-top:12px;",
+              sliderInput("trk_bins", tr("set_trk_res"),
+                          min = 100, max = 1000, value = 1000, step = 100),
+              uiOutput("track_settings"),
+              hr(),
+              actionButton("apply_tracks", tr("set_apply"), class = "btn-sm btn-primary"),
+              tags$span(" "),
+              actionButton("auto_adjust", tr("set_auto"), class = "btn-sm"))))),
       conditionalPanel("input.nav == 'Print'",
         h4(tr("print_title")),
         p(tags$small(tr("print_desc"))),
@@ -329,17 +455,7 @@ ui <- function(request) {
         hr(),
         helpText(tr("print_help"))),
       conditionalPanel("input.nav == 'Setting'",
-        fluidRow(
-          column(6, numericInput("map_height", tr("set_map_height"), 720, min = 200, step = 20)),
-          column(6, div(style = "margin-top:25px;",
-                        actionButton("fit_map", tr("set_fit"), class = "btn-sm")))),
-        sliderInput("trk_bins", tr("set_trk_res"),
-                    min = 100, max = 1000, value = 1000, step = 100),
-        uiOutput("track_settings"),
-        actionButton("apply_settings", tr("set_apply"), class = "btn-sm btn-primary"),
-        tags$span(" "),
-        actionButton("auto_adjust", tr("set_auto"), class = "btn-sm"),
-        hr(),
+        helpText(tr("set_app_desc")),
         actionButton("cfg_open", tr("cfg_open"), class = "btn-sm btn-block")),
       conditionalPanel("input.nav == 'About'",
         h4("HiCarta"),
@@ -353,9 +469,7 @@ ui <- function(request) {
           tags$li(tr("about_feat3")),
           tags$li(tr("about_feat4"))),
         tags$hr(),
-        p(tags$small(tr("about_built")))),
-      conditionalPanel("input.nav == 'Data'",
-        hr(), actionButton("open", tr("data_open"), class = "btn-primary btn-block"))
+        p(tags$small(tr("about_built"))))
     ),
     mainPanel(width = 9,
       # fixed-height info area so the map does not shift when hover text appears
@@ -380,9 +494,49 @@ server <- function(input, output, session) {
   rv <- reactiveValues(menu = NULL, msg = tr("msg_start"),
                        ov = NULL, ov_res = NULL, chr = NULL, chrlen = NULL,
                        tileURL = NULL, tracks = list(), trk_seq = 0, trk_bins = 1000,
-                       trk_msg = "",
+                       trk_msg = "", sample_name = NULL, restore_vmax = NULL,
+                       bookmarks = list(), bm_seq = 0L,
                        exp_key = NULL, exp_data = NULL, exp_msg = "")
   st <- new.env()   # tile-render state shared with the tile HTTP handler
+
+  # ---- local file pickers (shinyFiles) ----
+  # Browses the machine running the app (= the user's own computer for the
+  # desktop build). The chosen file's full path fills the matching text box:
+  #   .hic  -> Data panel path;   bigWig/BED/GFF3 -> Tracks panel path.
+  if (HAS_SHINYFILES) {
+    sf_roots <- c(Home = normalizePath("~", winslash = "/", mustWork = FALSE),
+                  shinyFiles::getVolumes()())
+
+    shinyFiles::shinyFileChoose(input, "hic_file_btn", roots = sf_roots,
+                                filetypes = c("hic"))
+    observeEvent(input$hic_file_btn, {
+      fp <- tryCatch(shinyFiles::parseFilePaths(sf_roots, input$hic_file_btn),
+                     error = function(e) NULL)
+      if (!is.null(fp) && nrow(fp) > 0)
+        updateTextInput(session, "hic_local", value = as.character(fp$datapath[1]))
+    })
+
+    # Tracks: accept bigWig, BED and gene-model extensions (both letter cases).
+    trk_ext <- c("bw", "bigwig", "bigWig", "bedgraph", "bedGraph",
+                 "bed", "narrowPeak", "narrowpeak", "broadPeak", "broadpeak",
+                 "gff", "gff3", "gtf")
+    shinyFiles::shinyFileChoose(input, "trk_file_btn", roots = sf_roots,
+                                filetypes = trk_ext)
+    observeEvent(input$trk_file_btn, {
+      fp <- tryCatch(shinyFiles::parseFilePaths(sf_roots, input$trk_file_btn),
+                     error = function(e) NULL)
+      if (!is.null(fp) && nrow(fp) > 0) {
+        path <- as.character(fp$datapath[1])
+        updateTextInput(session, "trk_path", value = path)
+        # Pre-select the track type from the extension as a convenience.
+        ext <- tolower(tools::file_ext(path))
+        ty  <- if (ext %in% c("bed", "narrowpeak", "broadpeak")) "BED"
+               else if (ext %in% c("gff", "gff3", "gtf")) "gene"
+               else "bigWig"   # bw / bigwig / bedgraph = signal
+        updateSelectInput(session, "trk_type", selected = ty)
+      }
+    })
+  }
 
   # ---- menu ----
   observeEvent(input$load_menu, {
@@ -420,12 +574,15 @@ server <- function(input, output, session) {
     logmin <- rv$logmin; logmax <- rv$logmax
     steplin <- signif((dmax - dmin) / 200, 2); if (!is.finite(steplin) || steplin <= 0) steplin <- 1
     steplog <- (logmax - logmin) / 200; if (!is.finite(steplog) || steplog <= 0) steplog <- 0.01
-    lvmax <- if (p99 > 0) log10(p99) else logmin
+    # seed the scale from a restored session value if present, else auto (p99)
+    v0 <- if (!is.null(rv$restore_vmax) && is.finite(rv$restore_vmax) && rv$restore_vmax > 0)
+            rv$restore_vmax else p99
+    lvmax <- if (v0 > 0) log10(v0) else logmin
     tagList(
       tags$label(tr("disp_maxval")),
-      sliderInput("vmax", tr("disp_linear"), dmin, dmax, p99, step = steplin),
+      sliderInput("vmax", tr("disp_linear"), dmin, dmax, v0, step = steplin),
       sliderInput("vmax_log", tr("disp_log"), logmin, logmax, lvmax, step = steplog),
-      numericInput("vmax_num", tr("disp_value"), signif(p99, 4), step = steplin),
+      numericInput("vmax_num", tr("disp_value"), signif(v0, 4), step = steplin),
       helpText(sprintf(tr("disp_min_fixed"), signif(dmax, 4)))
     )
   })
@@ -475,8 +632,14 @@ server <- function(input, output, session) {
     else NULL
   }
 
-  do_open <- function() {
-    src <- current_src()
+  # Open a .hic and render it. All parameters default to the current inputs, but
+  # can be passed explicitly (used by session restore, which must not depend on
+  # asynchronous input updates). vmax = NULL means auto-scale (99th percentile).
+  do_open <- function(src = current_src(), chr = input$chr,
+                      start = input$start, end = input$end,
+                      ystart = start, yend = end,
+                      norm = input$normalization, color = input$color,
+                      vmax = NULL) {
     if (is.null(src)) { rv$msg <- tr("msg_pick_src"); return() }
     tryCatch({
       # remote URLs are downloaded once and read locally; local paths pass through
@@ -486,26 +649,42 @@ server <- function(input, output, session) {
       })
       if (!identical(path, src)) message("[cache] using local file: ", path)
       res_all <- sort(strawr::readHicBpResolutions(path))
-      chrlen  <- .hic_chrom_length(path, input$chr)
+      chrlen  <- .hic_chrom_length(path, chr)
       # confirm the true normalization list from the local file, keep selection
       norms_local <- tryCatch(strawr::readHicNormTypes(path), error = function(e) NULL)
       if (!is.null(norms_local) && length(norms_local) > 0) {
-        sel <- if (!is.null(input$normalization) && input$normalization %in% norms_local)
-                 input$normalization else "NONE"
+        sel <- if (!is.null(norm) && norm %in% norms_local) norm else "NONE"
         updateSelectInput(session, "normalization", choices = norms_local, selected = sel)
+        norm <- sel
       }
       # overview at a moderate resolution (~400 bins across the chromosome),
       # not the very coarsest — gives a meaningful default scale & hover score.
       ovres <- choose_res(chrlen / 400, res_all)
       withProgress(message = tr("prog_overview"), value = 0.5, {
-        rv$ov     <- read_hic_map(path, chr = input$chr, start = 1, end = NA,
-                                  resolution = ovres, normalization = input$normalization)
+        rv$ov     <- read_hic_map(path, chr = chr, start = 1, end = NA,
+                                  resolution = ovres, normalization = norm)
         rv$ov_res <- ovres
       })
-      rv$chr <- input$chr; rv$chrlen <- chrlen
-      rv$open_key <- paste(src, input$chr)
+      rv$chr <- chr; rv$chrlen <- chrlen
+      rv$open_key <- paste(src, chr)
+      # human-readable name of the sample now on screen: local file -> basename;
+      # menu dataset -> "sample label / dataset label" looked up in the menu.
+      rv$sample_name <- {
+        if (!is.null(input$hic_local) && nzchar(input$hic_local)) {
+          basename(input$hic_local)
+        } else {
+          lbl <- NULL
+          if (!is.null(rv$menu) && !is.null(input$dataset_sel)) {
+            row <- rv$menu[rv$menu$url == input$dataset_sel, ]
+            if (nrow(row) > 0)
+              lbl <- paste(row$sample_label[1], row$dataset_label[1], sep = " / ")
+          }
+          if (is.null(lbl)) basename(src) else lbl
+        }
+      }
       vals <- as.numeric(rv$ov); vals <- vals[is.finite(vals)]
       p99  <- sort(vals)[max(1, round(length(vals) * 0.99))]
+      rv$restore_vmax <- vmax     # seeds the value-scale UI (NULL = auto p99)
       rv$dmin <- min(vals); rv$dmax <- max(vals)
       pos <- vals[vals > 0]; rv$dfloor <- if (length(pos)) min(pos) else 1
       rv$p99 <- p99
@@ -522,54 +701,166 @@ server <- function(input, output, session) {
 
       # fill tile-render state (read by the HTTP handler)
       st$type <- "hic"; st$db <- NULL
-      st$path <- path; st$chr <- input$chr; st$chrlen <- chrlen
-      st$res <- res_all; st$norm <- input$normalization
-      st$color <- input$color
+      st$path <- path; st$chr <- chr; st$chrlen <- chrlen
+      st$res <- res_all; st$norm <- norm
+      st$color <- color
       st$baseRes <- baseRes; st$maxZoom <- maxZoom; st$ovres <- ovres
       st$vmin <- 0
-      st$vmax <- p99
+      st$vmax <- if (!is.null(vmax) && is.finite(vmax) && vmax > 0) vmax else p99
       st$blank <- NULL
 
       url <- register_tiles()
       mapMaxZoom <- maxZoom + 6      # allow zooming in past the finest tiles (upscaled)
       ver <- as.numeric(Sys.time())  # cache-buster so re-Open replaces old tiles
       message(sprintf("[open] chr=%s chrlen=%d baseRes=%d maxZoom=%d mapMaxZoom=%d SCALE=%g U=%g",
-                      input$chr, chrlen, baseRes, maxZoom, mapMaxZoom, SCALE, Umap))
-      fx0 <- max(1, input$start); fx1 <- min(chrlen, input$end)
+                      chr, chrlen, baseRes, maxZoom, mapMaxZoom, SCALE, Umap))
+      fx0 <- max(1, start);  fx1 <- min(chrlen, end)
+      fy0 <- max(1, ystart); fy1 <- min(chrlen, yend)
       session$sendCustomMessage("initTiles", list(
         url = url, scale = SCALE, U = Umap, maxZoom = maxZoom, mapMaxZoom = mapMaxZoom,
-        ver = ver, chrlen = chrlen, fx0 = fx0, fy0 = fx0, fx1 = fx1, fy1 = fx1))
+        ver = ver, chrlen = chrlen, fx0 = fx0, fy0 = fy0, fx1 = fx1, fy1 = fy1))
       rv$msg <- sprintf(tr("msg_ready"),
-                        input$chr, format(chrlen, big.mark = ","),
+                        chr, format(chrlen, big.mark = ","),
                         paste(res_all, collapse = "/"))
+      session$sendCustomMessage("closeLoader", list())   # reveal the map
     }, error = function(e) rv$msg <- sprintf(tr("msg_open_err"), conditionMessage(e)))
   }
   observeEvent(input$open, do_open())
 
-  # per-track height controls (in the Setting panel)
+  # ---- session save / restore : the whole display state <-> a JSON file ----
+  # Captures the data source, current region, display scale and every track so
+  # the same view can be reproduced later.
+  snapshot_session <- function() {
+    v <- input$map_view
+    region <- if (!is.null(v))
+                list(start = round(max(1, v$west)), end = round(v$east),
+                     ystart = round(max(1, v$north)), yend = round(v$south))
+              else list(start = input$start, end = input$end)
+    tracks <- lapply(unname(rv$tracks), function(t) list(
+      path = t$path, type = t$type, name = t$name, color = t$color,
+      height = t$height, ymax = if (is.null(t$ymax)) 0 else t$ymax,
+      agg = if (is.null(t$agg)) "mean" else t$agg))
+    bookmarks <- lapply(unname(rv$bookmarks), function(b) list(
+      name = b$name, chr = b$chr, x0 = b$x0, x1 = b$x1, y0 = b$y0, y1 = b$y1))
+    list(app = "HiCarta", format = 1L,
+         hic = list(src = current_src(), chr = rv$chr, normalization = input$normalization),
+         region = region,
+         display = list(color = input$color, vmax = input$vmax_num,
+                        map_height = input$map_height, trk_bins = rv$trk_bins),
+         tracks = tracks, bookmarks = bookmarks)
+  }
+
+  output$session_save <- downloadHandler(
+    filename = function() sprintf("HiCarta_session_%s.json", format(Sys.time(), "%Y%m%d_%H%M%S")),
+    content  = function(file) {
+      writeLines(jsonlite::toJSON(snapshot_session(), auto_unbox = TRUE, pretty = TRUE,
+                                  null = "null", na = "null"), file)
+    }
+  )
+
+  observeEvent(input$session_file, {
+    f <- input$session_file
+    if (is.null(f) || is.null(f$datapath)) return()
+    sess <- tryCatch(jsonlite::fromJSON(f$datapath, simplifyVector = FALSE),
+                     error = function(e) NULL)
+    if (is.null(sess) || !identical(sess$app, "HiCarta")) {
+      rv$trk_msg <- tr("msg_session_bad"); rv$msg <- tr("msg_session_bad"); return()
+    }
+    hic <- sess$hic %||% list(); reg <- sess$region %||% list(); d <- sess$display %||% list()
+    if (is.null(hic$src) || !nzchar(hic$src)) { rv$msg <- tr("msg_session_bad"); return() }
+
+    # rebuild tracks
+    tl <- list(); n <- 0L
+    for (t in (sess$tracks %||% list())) {
+      n <- n + 1L
+      tl[[as.character(n)]] <- list(id = n, name = t$name %||% basename(t$path %||% "track"),
+        path = t$path, type = t$type %||% "bigWig", color = t$color %||% "darkblue",
+        height = t$height %||% 90, ymax = t$ymax %||% 0, agg = t$agg %||% "mean")
+    }
+    rv$trk_seq <- n; rv$tracks <- tl
+
+    # rebuild bookmarks
+    bl <- list(); bn <- 0L
+    for (b in (sess$bookmarks %||% list())) {
+      bn <- bn + 1L
+      bl[[as.character(bn)]] <- list(id = bn, name = b$name %||% sprintf("bm%d", bn),
+        chr = b$chr, x0 = b$x0, x1 = b$x1, y0 = b$y0, y1 = b$y1)
+    }
+    rv$bm_seq <- bn; rv$bookmarks <- bl
+
+    # reflect state in the widgets (for later manual editing)
+    updateTextInput(session, "hic_local", value = hic$src)
+    if (!is.null(hic$chr))
+      updateSelectInput(session, "chr", choices = unique(c(hic$chr, "I", "II", "III")),
+                        selected = hic$chr)
+    if (!is.null(reg$start)) updateNumericInput(session, "start", value = reg$start)
+    if (!is.null(reg$end))   updateNumericInput(session, "end",   value = reg$end)
+    if (!is.null(d$color))   updateSelectInput(session, "color", selected = d$color)
+    if (!is.null(d$trk_bins)) {
+      rv$trk_bins <- d$trk_bins; updateSliderInput(session, "trk_bins", value = d$trk_bins)
+    }
+    if (!is.null(d$map_height)) updateNumericInput(session, "map_height", value = d$map_height)
+
+    # open with explicit values so we don't depend on async input updates
+    do_open(src = hic$src, chr = hic$chr %||% input$chr,
+            start = reg$start %||% 1, end = reg$end %||% 1e12,
+            ystart = reg$ystart %||% reg$start %||% 1,
+            yend = reg$yend %||% reg$end %||% 1e12,
+            norm = hic$normalization %||% "NONE",
+            color = d$color %||% input$color, vmax = d$vmax)
+    if (!is.null(d$map_height))
+      session$sendCustomMessage("setMapHeight", list(h = d$map_height))
+    rv$trk_msg <- tr("msg_session_loaded")
+  })
+
+  # per-track display controls (Display panel -> Tracks tab): name, colour,
+  # height, max value and (bigWig) aggregation. Committed by "Apply".
   output$track_settings <- renderUI({
     if (length(rv$tracks) == 0) return(helpText(tr("set_no_trk_size")))
     do.call(tagList, lapply(rv$tracks, function(t) tagList(
-      tags$b(t$name),
+      tags$hr(),
+      tags$b(sprintf("%s  [%s]", t$name, t$type)),
+      textInput(paste0("trk_nm_", t$id), tr("trk_label"), t$name),
       fluidRow(
-        column(6, numericInput(paste0("trk_h_", t$id), tr("set_height"), t$height, min = 30, step = 10)),
+        column(6, selectInput(paste0("trk_col_", t$id), tr("trk_color"),
+                              choices = TRK_COLORS,
+                              selected = if (is.null(t$color)) "darkblue" else t$color)),
+        column(6, numericInput(paste0("trk_h_", t$id), tr("set_height"), t$height, min = 30, step = 10))),
+      fluidRow(
         column(6, numericInput(paste0("trk_max_", t$id), tr("set_max_auto"),
-                               if (is.null(t$ymax)) 0 else t$ymax, min = 0))))))
+                               if (is.null(t$ymax)) 0 else t$ymax, min = 0)),
+        column(6, if (identical(t$type, "bigWig"))
+          selectInput(paste0("trk_agg_", t$id), tr("set_agg"),
+                      choices = setNames(c("mean", "max"),
+                                         c(tr("set_agg_mean"), tr("set_agg_max"))),
+                      selected = if (is.null(t$agg)) "mean" else t$agg))))))
   })
 
-  # Setting: apply map height, track resolution, per-track heights and max
-  observeEvent(input$apply_settings, {
+  # Display > Map tab: apply the contact-map height.
+  observeEvent(input$apply_map, {
     h <- input$map_height
     if (is.null(h) || is.na(h) || h < 100) h <- 720
     session$sendCustomMessage("setMapHeight", list(h = h))
+  })
+
+  # Display > Tracks tab: apply track resolution + per-track name/colour/height/
+  # max/aggregation.
+  observeEvent(input$apply_tracks, {
     rv$trk_bins <- if (is.null(input$trk_bins) || is.na(input$trk_bins)) 1000 else input$trk_bins
     if (length(rv$tracks) > 0) {
       tl <- rv$tracks
       for (t in tl) {
+        k <- as.character(t$id)
+        nv <- input[[paste0("trk_nm_", t$id)]]
+        if (!is.null(nv) && nzchar(nv)) tl[[k]]$name <- nv
+        cv <- input[[paste0("trk_col_", t$id)]]
+        if (!is.null(cv) && nzchar(cv)) tl[[k]]$color <- cv
         hv <- input[[paste0("trk_h_", t$id)]]
-        if (!is.null(hv) && !is.na(hv) && hv >= 20) tl[[as.character(t$id)]]$height <- hv
+        if (!is.null(hv) && !is.na(hv) && hv >= 20) tl[[k]]$height <- hv
         mv <- input[[paste0("trk_max_", t$id)]]
-        if (!is.null(mv) && !is.na(mv)) tl[[as.character(t$id)]]$ymax <- mv
+        if (!is.null(mv) && !is.na(mv)) tl[[k]]$ymax <- mv
+        av <- input[[paste0("trk_agg_", t$id)]]
+        if (!is.null(av) && av %in% c("mean", "max")) tl[[k]]$agg <- av
       }
       rv$tracks <- tl
     }
@@ -673,6 +964,67 @@ server <- function(input, output, session) {
     }
   })
 
+  # 8-direction pan (dx,dy in {-1,0,1}) scaled by the chosen step fraction, plus
+  # a center reset to the whole chromosome. All no-ops until a map is loaded.
+  pan <- function(dx, dy) {
+    if (is.null(rv$chr)) return()
+    step <- suppressWarnings(as.numeric(input$pan_step))
+    if (is.na(step) || step <= 0) step <- 0.5
+    session$sendCustomMessage("panView", list(fx = dx * step, fy = dy * step))
+  }
+  observeEvent(input$pan_left,  pan(-1, 0))
+  observeEvent(input$pan_right, pan( 1, 0))
+  observeEvent(input$pan_up,    pan(0, -1))
+  observeEvent(input$pan_down,  pan(0,  1))
+  observeEvent(input$pan_ul,    pan(-1, -1))
+  observeEvent(input$pan_ur,    pan( 1, -1))
+  observeEvent(input$pan_dl,    pan(-1,  1))
+  observeEvent(input$pan_dr,    pan( 1,  1))
+  observeEvent(input$view_whole, {
+    if (is.null(rv$chrlen)) return()
+    session$sendCustomMessage("viewWhole", list(chrlen = rv$chrlen))
+  })
+
+  # ---- bookmarks : star the current view, jump back to it later ----
+  observeEvent(input$bm_add, {
+    if (is.null(rv$chr)) { rv$msg <- tr("msg_need_hic_first"); return() }
+    v <- input$map_view; if (is.null(v)) return()
+    x0 <- round(max(1, v$west)); x1 <- round(v$east)
+    y0 <- round(max(1, v$north)); y1 <- round(v$south)
+    rv$bm_seq <- rv$bm_seq + 1L; id <- rv$bm_seq
+    nm <- if (!is.null(input$bm_name) && nzchar(input$bm_name)) input$bm_name
+          else sprintf("%s:%s-%s", rv$chr, format(x0, big.mark = ","), format(x1, big.mark = ","))
+    rv$bookmarks[[as.character(id)]] <-
+      list(id = id, name = nm, chr = rv$chr, x0 = x0, x1 = x1, y0 = y0, y1 = y1)
+    updateTextInput(session, "bm_name", value = "")
+  })
+
+  # click a bookmark: same chromosome -> smooth pan; different -> re-open there
+  observeEvent(input$bm_goto, {
+    b <- rv$bookmarks[[as.character(input$bm_goto)]]
+    if (is.null(b)) return()
+    if (!is.null(rv$chr) && identical(b$chr, rv$chr))
+      session$sendCustomMessage("gotoView", list(x0 = b$x0, x1 = b$x1, y0 = b$y0, y1 = b$y1))
+    else
+      do_open(chr = b$chr, start = b$x0, end = b$x1, ystart = b$y0, yend = b$y1)
+  })
+  observeEvent(input$bm_del, { rv$bookmarks[[as.character(input$bm_del)]] <- NULL })
+
+  output$bookmark_list <- renderUI({
+    if (length(rv$bookmarks) == 0) return(helpText(tr("bm_none")))
+    do.call(tagList, lapply(rv$bookmarks, function(b)
+      div(style = "display:flex; align-items:center; gap:4px; margin-bottom:3px;",
+        tags$button(type = "button", class = "btn btn-sm btn-default",
+          style = paste0("flex:1; text-align:left; overflow:hidden;",
+                         "text-overflow:ellipsis; white-space:nowrap;"),
+          title = b$name,
+          onclick = sprintf("Shiny.setInputValue('bm_goto','%s',{priority:'event'});", b$id),
+          b$name),
+        tags$button(type = "button", class = "btn btn-sm", title = tr("bm_delete"),
+          onclick = sprintf("Shiny.setInputValue('bm_del','%s',{priority:'event'});", b$id),
+          HTML("&#10005;")))))
+  })
+
   # display changes -> update state and redraw tiles (no re-open needed)
   observeEvent(list(input$color, input$vmax_num), {
     if (is.null(rv$chrlen)) return()
@@ -694,8 +1046,11 @@ server <- function(input, output, session) {
       resLab <- sprintf(tr("coord_res"),
                         if (res >= 1000) paste0(res / 1000, " kb") else paste0(res, " bp"))
     }
-    sprintf(tr("coord_view"), rv$chr, f(v$west), f(v$east),
-            rv$chr, f(v$north), f(v$south), resLab)
+    nameLab <- if (!is.null(rv$sample_name) && nzchar(rv$sample_name))
+                 paste0(sprintf(tr("coord_sample"), rv$sample_name), "   ") else ""
+    paste0(nameLab,
+           sprintf(tr("coord_view"), rv$chr, f(v$west), f(v$east),
+                   rv$chr, f(v$north), f(v$south), resLab))
   })
 
   # hover readout (score sampled from the coarse overview; distance is exact)
@@ -716,6 +1071,9 @@ server <- function(input, output, session) {
   output$trk_status <- renderText(rv$trk_msg)
 
   observeEvent(input$trk_add, {
+    # tracks are drawn on the Hi-C map's coordinate system, so a map must be
+    # loaded first — otherwise the sync/auto-fit runs against an unset view.
+    if (is.null(rv$chr)) { rv$trk_msg <- tr("msg_need_hic_first"); return() }
     if (is.null(input$trk_path) || !nzchar(input$trk_path)) {
       rv$trk_msg <- tr("msg_enter_track"); return() }
     withProgress(message = tr("prog_cache_trk"), value = 0.4, {
@@ -727,7 +1085,8 @@ server <- function(input, output, session) {
     nm <- if (nzchar(input$trk_name)) input$trk_name else tools::file_path_sans_ext(basename(input$trk_path))
     col <- if (is.null(input$trk_color) || !nzchar(input$trk_color)) "darkblue" else input$trk_color
     rv$tracks[[as.character(id)]] <- list(id = id, name = nm, path = lp,
-      type = input$trk_type, color = col, height = input$trk_height, ymax = 0)
+      type = input$trk_type, color = col, height = input$trk_height, ymax = 0,
+      agg = "mean")
     if (identical(input$trk_type, "gene"))
       withProgress(message = tr("prog_parse_gff3"), value = 0.5,
                    { tryCatch(read_genes(lp), error = function(e) rv$trk_msg <- sprintf(tr("msg_gff3_err"), conditionMessage(e))) })

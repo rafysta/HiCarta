@@ -42,8 +42,14 @@ LANG_STRINGS <- list(
   # -------------------------------------------------------------------------
   en = list(
     # nav pills
-    nav_data = "Data", nav_region = "Region", nav_display = "Display",
+    nav_data = "Data", nav_region = "Navigate", nav_display = "Display",
     nav_tracks = "Tracks", nav_print = "Print", nav_setting = "Setting",
+    data_loader_title = "Load data", data_loader_close = "Close",
+    data_loader_hic   = "Hi-C",
+    session_tab   = "Session",
+    session_save  = "Save current view",
+    session_load  = "Restore from file (.json)",
+    session_help  = "Save the whole display (data source, region, scale and all tracks) to a file, then restore it later to reproduce the same view.",
     nav_about = "About",
 
     # Data panel
@@ -55,6 +61,8 @@ LANG_STRINGS <- list(
     data_norm      = "Normalization",
     data_local_hic = "or local .hic file",
     data_hic_path  = ".hic file path",
+    data_hic_browse       = "Browse…",
+    data_hic_browse_title = "Select a .hic file",
     data_open      = "Open map",
 
     # Region panel
@@ -62,9 +70,27 @@ LANG_STRINGS <- list(
     region_ystart = "Y-axis start (bp)",
     region_yend   = "Y-axis end (bp)",
     region_goto   = "Go to region",
+    region_nav       = "Pan view (½ screen)",
+    region_pan_left  = "Left",
+    region_pan_right = "Right",
+    region_pan_up    = "Up",
+    region_pan_down  = "Down",
+    region_pan_ul    = "Up-left",
+    region_pan_ur    = "Up-right",
+    region_pan_dl    = "Down-left",
+    region_pan_dr    = "Down-right",
+    region_step      = "Step",
+    region_whole     = "Whole chromosome",
+    bm_title    = "Bookmarks",
+    bm_add      = "Bookmark this view",
+    bm_name_ph  = "Name (optional)",
+    bm_none     = "No bookmarks yet.",
+    bm_delete   = "Delete",
 
     # Display panel
     disp_palette   = "Palette",
+    disp_tab_map   = "Map",
+    set_app_desc   = "App settings: menu URL, track list, language.",
     disp_open_first = "Open a map first.",
     disp_maxval    = "Max value",
     disp_linear    = "linear",
@@ -79,6 +105,8 @@ LANG_STRINGS <- list(
     trk_category   = "Category",
     trk_from_xml   = "Track from XML",
     trk_or_path    = "…or bigWig/BED file/URL",
+    trk_browse       = "Browse…",
+    trk_browse_title = "Select a bigWig / BED file",
     trk_type       = "Type",
     trk_type_gene  = "gene (GFF3)",
     trk_type_bs    = "Border Strength",
@@ -139,6 +167,9 @@ LANG_STRINGS <- list(
     set_no_trk_size  = "No tracks to size.",
     set_height       = "Height",
     set_max_auto     = "Max (0=auto)",
+    set_agg          = "Aggregation (whole-chromosome view)",
+    set_agg_mean     = "Mean (IGV default)",
+    set_agg_max      = "Max (keep peaks)",
 
     # Config-file dialog
     cfg_open         = "Edit config file…",
@@ -171,6 +202,7 @@ LANG_STRINGS <- list(
                            "Successor to the Java HiD contact viewer; part of the rfy_hic2 workflow."),
 
     # main-panel readouts
+    coord_sample    = "Sample: %s",
     coord_view      = "View  x: %s:%s-%s   y: %s:%s-%s%s",
     coord_res       = "    resolution: %s",
     hover_outside   = "Cursor outside map",
@@ -185,6 +217,9 @@ LANG_STRINGS <- list(
     msg_open_err     = "Open error: %s",
     msg_ready        = "Ready: %s (%s bp). Resolutions %s.",
     msg_enter_track  = "Enter a track file path or URL.",
+    msg_need_hic_first = "Load a Hi-C map first — tracks are drawn on its coordinates.",
+    msg_session_loaded = "Session restored.",
+    msg_session_bad    = "Not a valid HiCarta session file.",
     msg_added_track  = "Added track: %s (%s)",
     msg_cleared_trk  = "Cleared all tracks.",
     msg_gff3_err     = "GFF3 error: %s",
@@ -208,8 +243,14 @@ LANG_STRINGS <- list(
   # -------------------------------------------------------------------------
   ja = list(
     # nav pills
-    nav_data = "データ", nav_region = "領域",
+    nav_data = "データ", nav_region = "移動",
     nav_display = "表示", nav_tracks = "トラック",
+    data_loader_title = "データ読み込み", data_loader_close = "閉じる",
+    data_loader_hic   = "Hi-C",
+    session_tab   = "セッション",
+    session_save  = "現在の表示を保存",
+    session_load  = "ファイルから復元 (.json)",
+    session_help  = "表示全体（データ元・領域・スケール・全トラック）をファイルに保存し、後で読み込むと同じ表示を再現できます。",
     nav_print = "印刷", nav_setting = "設定",
     nav_about = "情報",
 
@@ -222,6 +263,8 @@ LANG_STRINGS <- list(
     data_norm      = "正規化",
     data_local_hic = "またはローカル .hic ファイル",
     data_hic_path  = ".hic ファイルパス",
+    data_hic_browse       = "参照…",
+    data_hic_browse_title = ".hic ファイルを選択",
     data_open      = "マップを開く",
 
     # Region panel
@@ -229,9 +272,27 @@ LANG_STRINGS <- list(
     region_ystart = "Y軸 開始 (bp)",
     region_yend   = "Y軸 終了 (bp)",
     region_goto   = "領域へ移動",
+    region_nav       = "画面移動（½画面ずつ）",
+    region_pan_left  = "左へ",
+    region_pan_right = "右へ",
+    region_pan_up    = "上へ",
+    region_pan_down  = "下へ",
+    region_pan_ul    = "左上へ",
+    region_pan_ur    = "右上へ",
+    region_pan_dl    = "左下へ",
+    region_pan_dr    = "右下へ",
+    region_step      = "移動量",
+    region_whole     = "染色体全体を表示",
+    bm_title    = "ブックマーク",
+    bm_add      = "この表示を保存",
+    bm_name_ph  = "名前（任意）",
+    bm_none     = "ブックマークはまだありません。",
+    bm_delete   = "削除",
 
     # Display panel
     disp_palette   = "カラーパレット",
+    disp_tab_map   = "マップ",
+    set_app_desc   = "アプリ設定：メニューURL・トラックリスト・表示言語。",
     disp_open_first = "先にマップを開いてください。",
     disp_maxval    = "最大値",
     disp_linear    = "線形",
@@ -246,6 +307,8 @@ LANG_STRINGS <- list(
     trk_category   = "カテゴリ",
     trk_from_xml   = "XML からトラック",
     trk_or_path    = "…または bigWig/BED ファイル/URL",
+    trk_browse       = "参照…",
+    trk_browse_title = "bigWig / BED ファイルを選択",
     trk_type       = "種類",
     trk_type_gene  = "遺伝子 (GFF3)",
     trk_type_bs    = "境界強度",
@@ -305,6 +368,9 @@ LANG_STRINGS <- list(
     set_no_trk_size  = "サイズ変更するトラックがありません。",
     set_height       = "高さ",
     set_max_auto     = "最大 (0=自動)",
+    set_agg          = "集計方法（染色体全体表示）",
+    set_agg_mean     = "平均（IGV既定）",
+    set_agg_max      = "最大（ピーク保持）",
 
     # Config-file dialog
     cfg_open         = "設定ファイルを編集…",
@@ -337,6 +403,7 @@ LANG_STRINGS <- list(
                            "Java 版 HiD contact viewer の後継で、rfy_hic2 ワークフローの一部です。"),
 
     # main-panel readouts
+    coord_sample    = "サンプル: %s",
     coord_view      = "表示  x: %s:%s-%s   y: %s:%s-%s%s",
     coord_res       = "    解像度: %s",
     hover_outside   = "カーソルはマップ外です",
@@ -351,6 +418,9 @@ LANG_STRINGS <- list(
     msg_open_err     = "オープンエラー: %s",
     msg_ready        = "準備完了: %s (%s bp)。解像度 %s。",
     msg_enter_track  = "トラックファイルのパスまたは URL を入力してください。",
+    msg_need_hic_first = "先に Hi-C マップを読み込んでください（トラックはその座標上に描画されます）。",
+    msg_session_loaded = "セッションを復元しました。",
+    msg_session_bad    = "有効な HiCarta セッションファイルではありません。",
     msg_added_track  = "トラックを追加: %s (%s)",
     msg_cleared_trk  = "すべてのトラックを消去しました。",
     msg_gff3_err     = "GFF3 エラー: %s",

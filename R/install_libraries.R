@@ -4,7 +4,9 @@
 
 repos <- "https://cloud.r-project.org"
 need <- c("shiny", "data.table", "RColorBrewer",
-          "leaflet", "htmlwidgets", "base64enc")   # leaflet* = tiled viewer
+          "leaflet", "htmlwidgets", "base64enc",   # leaflet* = tiled viewer
+          "jsonlite",                              # session save/restore (.json)
+          "shinyFiles")                            # local .hic file picker dialog
 for (p in need) {
   if (!requireNamespace(p, quietly = TRUE)) {
     message("Installing ", p, " …")
