@@ -1,66 +1,34 @@
 # インストール
 
-HiCarta はローカルの Shiny アプリとして、あなたのマシン上で動作します。サーバーやアカウントは不要です。
+HiCarta はあなたのパソコン上で動くアプリです。サーバーやアカウント登録は不要です。
+
+Windows なら、次の 3 ステップだけで起動できます。
 
 ## 1. R をインストールする
 
-<https://cran.r-project.org> から R（4.1 以上）をインストールします。
+<https://cran.r-project.org> を開き、Windows 用の R（4.1 以上）をダウンロードしてインストールします。基本的にそのまま「次へ」を押していけば完了します。
 
-- **Windows** — インストーラーが R を `C:\Program Files\R\R-x.y.z` に配置します。ランチャーが自動的に見つけます。
-- **macOS** — CRAN の `.pkg`、または `brew install --cask r`。
+!!! note "RStudio は不要です"
+    R 本体だけあれば動きます。RStudio が入っていても問題ありません。
 
-RStudio は**不要**ですが、あっても問題ありません。
+## 2. HiCarta をダウンロードして展開する
 
-## 2. HiCarta を入手する
+GitHub のページ <https://github.com/rafysta/HiCarta> を開き、緑色の **「Code」** ボタン → **「Download ZIP」** をクリックします。
 
-```
-git clone https://github.com/rafysta/HiCarta.git
-```
+![](../images/download.png){ width="400" }
 
-または GitHub から ZIP をダウンロードして展開します。
+ダウンロードした ZIP ファイルを、右クリック →「すべて展開」で展開します。展開先はどこでも構いません（デスクトップなど分かりやすい場所がおすすめです）。
 
-## 3. 初回起動（R パッケージのインストール）
+## 3. `run_windows.bat` をダブルクリックする
 
-- **Windows** — `run_windows.bat` をダブルクリック
-- **macOS** — `run_mac.command` をダブルクリック
+展開してできたフォルダの中にある **`run_windows.bat`** をダブルクリックします。
 
-初回起動時、ランチャーは必要なパッケージを確認し、不足があれば `R/install_libraries.R` を実行します。必要なパッケージ:
+初回だけ、必要な部品（R パッケージ）が自動でインストールされるため、数分かかることがあります。準備が終わると、ブラウザのタブが自動で開き、HiCarta が表示されます（アドレスは `http://127.0.0.1:7788`）。
 
-| パッケージ | 入手元 | 用途 |
-|---|---|---|
-| shiny, leaflet, htmlwidgets, base64enc | CRAN | アプリ + タイルマップ |
-| data.table | CRAN | 高速なテキスト読み込み |
-| RColorBrewer | CRAN | カラーパレット |
-| strawr | CRAN | `.hic` へのランダムアクセス |
-| rtracklayer | Bioconductor | bigWig / BED トラック |
-
-> `rtracklayer` は Bioconductor 由来で、初回のインストールに数分かかることがあります。これは正常です。
-
-すべて手動でインストールする場合:
-
-```r
-source("R/install_libraries.R")
-```
-
-## 4. 実行する
-
-アプリはブラウザのタブを `http://127.0.0.1:7788` で開きます。停止するには、ランチャーのウィンドウを閉じる（Windows）か、`Ctrl+C` を押す／ターミナルのウィンドウを閉じます（macOS）。ポート 7788 が使用中の場合、ランチャーが以前のインスタンスを自動的に終了します。
+2 回目以降はすぐに起動します。アプリを終了するときは、黒いランチャー画面（コマンドプロンプト）を閉じてください。
 
 ---
 
-## トラブルシューティング
+これで完了です。使い方は **[使い方](usage.md)**、画面の各項目の意味は **[画面と操作の説明](interface.md)** を参照してください。
 
-**「Could not find Rscript」** — R がインストールされていない、または `PATH` に無い状態です。R をインストールしてから起動し直してください。Windows ではランチャーが `C:\Program Files\R\` も検索します。
-
-**`rtracklayer` のインストールに失敗する** — 初回起動時にインターネット接続があることを確認してください。直接インストールすることもできます:
-
-```r
-if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
-BiocManager::install("rtracklayer")
-```
-
-**何も表示されない／マップが真っ白** — **Data** パネルでデータセットが読み込まれ、**Region** で領域が設定されていることを確認し、**Open map** をクリックしてください。
-
-**リモート `.hic` の初回オープンが遅い** — ファイルは一度だけ `_hic_cache/` にダウンロードされます。次回以降はそのキャッシュから読み込むため高速です。ディスク容量を空けたい場合は `_hic_cache/` を削除してください（必要に応じて再ダウンロードされます）。
-
-**macOS で「開発元を検証できないため開けません」** — `run_mac.command` を右クリック →「開く」を選ぶか、一度 `chmod +x run_mac.command` を実行してください。
+うまく起動しないときや、Mac をお使いの場合、手動でのインストール方法は **[セットアップ詳細・トラブルシューティング](setup-details.md)** を参照してください。

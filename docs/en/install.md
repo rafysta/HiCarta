@@ -1,78 +1,34 @@
 # Installation
 
-HiCarta runs on your own machine as a local Shiny app. No server or account is
-needed.
+HiCarta is an app that runs on your own computer. No server or account sign-up is required.
+
+On Windows, you can get it running in just the following 3 steps.
 
 ## 1. Install R
 
-Install R (≥ 4.1) from <https://cran.r-project.org>.
+Open <https://cran.r-project.org> and download and install R for Windows (4.1 or later). Just clicking "Next" through the installer is usually all it takes.
 
-- **Windows** — the installer puts R under `C:\Program Files\R\R-x.y.z`. The
-  launcher finds it automatically.
-- **macOS** — the CRAN `.pkg`, or `brew install --cask r`.
+!!! note "RStudio is not required"
+    Only base R is needed. It's fine if you also have RStudio installed.
 
-You do **not** need RStudio, but it is fine to have it.
+## 2. Download and unzip HiCarta
 
-## 2. Get HiCarta
+Open the GitHub page <https://github.com/rafysta/HiCarta>, then click the green **"Code"** button → **"Download ZIP"**.
 
-```
-git clone https://github.com/rafysta/HiCarta.git
-```
+![](../images/download.png){ width="400" }
 
-or download the ZIP from GitHub and extract it.
+Right-click the downloaded ZIP file and choose "Extract All" to unzip it. You can extract it anywhere (somewhere easy to find, like the Desktop, is recommended).
 
-## 3. First launch (installs R packages)
+## 3. Double-click `run_windows.bat`
 
-- **Windows** — double‑click `run_windows.bat`
-- **macOS** — double‑click `run_mac.command`
+Inside the unzipped folder, double-click **`run_windows.bat`**.
 
-On the first run the launcher checks for the required packages and, if any are
-missing, runs `R/install_libraries.R`. Required packages:
+Only on the first launch, the required components (R packages) are installed automatically, which can take a few minutes. Once ready, a browser tab opens automatically and shows HiCarta (the address is `http://127.0.0.1:7788`).
 
-| Package | Source | Purpose |
-|---|---|---|
-| shiny, leaflet, htmlwidgets, base64enc | CRAN | app + tiled map |
-| data.table | CRAN | fast text reading |
-| RColorBrewer | CRAN | colour palettes |
-| strawr | CRAN | random access to `.hic` |
-| rtracklayer | Bioconductor | bigWig / BED tracks |
-
-> `rtracklayer` comes from Bioconductor and can take a few minutes to install the
-> first time. This is normal.
-
-To install everything manually instead:
-
-```r
-source("R/install_libraries.R")
-```
-
-## 4. Run
-
-The app opens a browser tab at `http://127.0.0.1:7788`. To stop it, close the
-launcher window (Windows) or press `Ctrl+C` / close the Terminal window (macOS).
-If port 7788 is busy, the launcher closes the previous instance automatically.
+From the second time on, it starts right away. To quit the app, close the black launcher window (Command Prompt).
 
 ---
 
-## Troubleshooting
+That's it. For how to use HiCarta, see **[Usage](usage.md)**; for what each on-screen item means, see **[Screens & controls](interface.md)**.
 
-**"Could not find Rscript"** — R is not installed or not on `PATH`. Install R,
-then relaunch. On Windows the launcher also scans `C:\Program Files\R\`.
-
-**`rtracklayer` fails to install** — make sure you have internet access on the
-first run. You can install it directly:
-
-```r
-if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
-BiocManager::install("rtracklayer")
-```
-
-**Nothing appears / blank map** — confirm a dataset is loaded in the **Data**
-panel and a region is set in **Region**, then click **Open map**.
-
-**Slow first open of a remote `.hic`** — the file is downloaded once into
-`_hic_cache/`. Later opens read from that cache and are fast. Delete
-`_hic_cache/` to reclaim disk space (it will re‑download on demand).
-
-**macOS "cannot be opened because it is from an unidentified developer"** —
-right‑click `run_mac.command` → Open, or run `chmod +x run_mac.command` once.
+If it doesn't start, or if you're on a Mac, or want to install manually, see **[Setup details & troubleshooting](setup-details.md)**.

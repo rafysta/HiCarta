@@ -36,8 +36,11 @@ theme:
 nav:
   - Home: en/index.md
   - Installation: en/install.md
+  - What HiCarta can do: en/features.md
   - Usage: en/usage.md
+  - Screens & controls: en/interface.md
   - Data formats: en/data-formats.md
+  - Setup & troubleshooting: en/setup-details.md
 
 markdown_extensions:
   - admonition
@@ -73,5 +76,8 @@ plugins:
           nav_translations:
             Home: ホーム
             Installation: インストール
+            What HiCarta can do: できること
             Usage: 使い方
+            Screens & controls: 画面と操作の説明
             Data formats: データ形式
+            Setup & troubleshooting: セットアップ詳細・トラブルシューティング
