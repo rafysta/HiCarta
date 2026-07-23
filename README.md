@@ -10,10 +10,6 @@ zoom**. It streams only the tiles you are looking at, so it stays fast even on
 high‑resolution maps and large genomes. It reads `.hic` files directly (via
 `strawr`) and overlays 1‑D tracks (bigWig, BED, gene models, Border Strength).
 
-> HiCarta is a rewrite of an older Java viewer that loaded whole text matrices
-> into memory and broke on large data. Every reader now takes a `(chr, start, end)`
-> region and returns only that block.
-
 ---
 
 ## Quick start
