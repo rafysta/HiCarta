@@ -1,8 +1,9 @@
 # HiCarta
+**Interactive Hi-C contact map viewer** built with R + Shiny + Leaflet.
 
 📖 **Documentation site: <https://rafysta.github.io/HiCarta/>**
 
-**Interactive Hi-C contact map viewer** built with R + Shiny + Leaflet.
+![](https://rafysta.github.io/HiCarta/images/overview.png)
 
 HiCarta lets you explore Hi-C contact maps like a web map: **drag to pan, scroll to
 zoom**. It streams only the tiles you are looking at, so it stays fast even on
