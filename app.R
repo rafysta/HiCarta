@@ -276,6 +276,26 @@ function(el, x) {
     var b = document.getElementById('open_loader_btn');
     if (b) b.classList.remove('active');
   });
+  // map-resolution slider: show the real resolution (e.g. '10 kb') on the
+  // slider labels/handle instead of the raw 1..N index. The slider is rebuilt
+  // on each Open, so retry until its ion.rangeSlider instance exists.
+  window._resPrettify = function(n){
+    var i = Math.round(n) - 1, L = window._resLabels;
+    return (L && L[i] != null) ? L[i] : n;
+  };
+  Shiny.addCustomMessageHandler('setResLabels', function(msg){
+    window._resLabels = msg.labels || [];
+    // The slider is rebuilt by renderUI on each Open, so keep re-applying the
+    // prettify formatter for a short window to be sure the *current* instance
+    // (not a stale one about to be replaced) ends up labelled.
+    var tries = 0;
+    (function apply(){
+      var el = document.getElementById('map_res_idx');
+      var inst = el ? window.jQuery(el).data('ionRangeSlider') : null;
+      if (inst){ inst.update({ prettify: window._resPrettify }); }
+      if (tries++ < 20){ setTimeout(apply, 60); }
+    })();
+  });
 }
 "
 
@@ -432,6 +452,11 @@ ui <- function(request) {
             div(style = "padding-top:12px;",
               selectInput("color", tr("disp_palette"), c("matlab", "gentle", "red", "blue")),
               uiOutput("scale_controls"),
+              hr(),
+              # map-resolution control: auto (switch with zoom) or a fixed
+              # resolution chosen with the slider (independent of view area)
+              checkboxInput("map_res_auto", tr("disp_res_auto"), value = TRUE),
+              uiOutput("map_res_ui"),
               hr(),
               fluidRow(
                 column(6, numericInput("map_height", tr("set_map_height"), 720, min = 200, step = 20)),
@@ -708,6 +733,12 @@ server <- function(input, output, session) {
       st$vmin <- 0
       st$vmax <- if (!is.null(vmax) && is.finite(vmax) && vmax > 0) vmax else p99
       st$blank <- NULL
+      # map-resolution mode: default to auto on each Open. The slider UI is
+      # rebuilt (rv$res_all changed) with a default index; rv$res_prog tells its
+      # observer to ignore that programmatic (re)initialisation.
+      st$autoRes <- TRUE; st$fixedRes <- NULL
+      rv$res_prog <- TRUE
+      updateCheckboxInput(session, "map_res_auto", value = TRUE)
 
       url <- register_tiles()
       mapMaxZoom <- maxZoom + 6      # allow zooming in past the finest tiles (upscaled)
@@ -1034,17 +1065,91 @@ server <- function(input, output, session) {
     session$sendCustomMessage("redrawTiles", list(ver = as.numeric(Sys.time())))
   }, ignoreInit = TRUE)
 
+  # ---- map-resolution control (Display > Map tab) --------------------------
+  # A slider over the file's available resolutions lets the user pin the map to
+  # a fixed resolution regardless of the view area; the "auto" checkbox restores
+  # the zoom-driven auto-switching. The slider is rebuilt on each Open (its
+  # choices depend on the file), so rv$res_prog flags that programmatic
+  # (re)initialisation for the slider observer to ignore.
+  output$map_res_ui <- renderUI({
+    ra <- rv$res_all
+    if (is.null(ra)) return(helpText(tr("disp_open_first")))
+    di <- match(rv$ov_res, ra); if (is.na(di)) di <- length(ra)  # default = overview res
+    tagList(
+      sliderInput("map_res_idx", tr("disp_res"),
+                  min = 1, max = length(ra), value = di, step = 1, ticks = FALSE),
+      div(style = "margin-top:-8px;",
+          tags$small(textOutput("map_res_label", inline = TRUE))))
+  })
+
+  output$map_res_label <- renderText({
+    ra <- rv$res_all; i <- input$map_res_idx
+    if (is.null(ra) || is.null(i) || i < 1 || i > length(ra)) return("")
+    sprintf(tr("disp_res_cur"), fmt_res(ra[i]))
+  })
+
+  # push the real resolution labels onto the slider (index -> "10 kb") whenever
+  # the file's resolution set changes (i.e. on each Open, when the slider is
+  # rebuilt). The JS handler retries until the slider element exists.
+  observeEvent(rv$res_all, {
+    if (is.null(rv$res_all)) return()
+    session$sendCustomMessage("setResLabels",
+                              list(labels = vapply(rv$res_all, fmt_res, character(1))))
+  })
+
+  # AUTO mode: follow the map's zoom-driven resolution by moving the slider to
+  # match. Guarded by rv$res_prog so this programmatic move does NOT trip the
+  # manual-move observer (which would switch to fixed mode).
+  observeEvent(input$map_view, {
+    if (!isTRUE(input$map_res_auto)) return()
+    v <- input$map_view
+    if (is.null(v) || is.null(v$zoom) || is.null(rv$baseRes) || is.null(rv$res_all)) return()
+    nz  <- max(0, min(round(v$zoom), rv$maxZoom))
+    bpp <- rv$baseRes * 2^(rv$maxZoom - nz)
+    idx <- which.min(abs(log2(rv$res_all) - log2(bpp)))
+    if (!is.null(input$map_res_idx) && input$map_res_idx != idx) {
+      rv$res_prog <- TRUE
+      updateSliderInput(session, "map_res_idx", value = idx)
+    }
+  })
+
+  # moving the slider fixes the resolution and turns auto off
+  observeEvent(input$map_res_idx, {
+    if (isTRUE(rv$res_prog)) { rv$res_prog <- FALSE; return() }  # ignore (re)init
+    if (is.null(rv$res_all) || is.null(rv$chrlen)) return()
+    st$autoRes <- FALSE
+    st$fixedRes <- rv$res_all[input$map_res_idx]
+    if (isTRUE(input$map_res_auto))
+      updateCheckboxInput(session, "map_res_auto", value = FALSE)
+    session$sendCustomMessage("redrawTiles", list(ver = as.numeric(Sys.time())))
+  }, ignoreInit = TRUE)
+
+  # auto checkbox: on -> zoom-driven; off -> pin to the slider's resolution
+  observeEvent(input$map_res_auto, {
+    if (is.null(rv$chrlen)) return()
+    if (isTRUE(input$map_res_auto)) {
+      st$autoRes <- TRUE
+    } else {
+      st$autoRes <- FALSE
+      if (!is.null(input$map_res_idx)) st$fixedRes <- rv$res_all[input$map_res_idx]
+    }
+    session$sendCustomMessage("redrawTiles", list(ver = as.numeric(Sys.time())))
+  }, ignoreInit = TRUE)
+
   # view coordinate readout
   output$coord <- renderText({
     v <- input$map_view; if (is.null(v) || is.null(rv$chr)) return("")
     f <- function(z) format(round(max(1, z)), big.mark = ",", scientific = FALSE)
     resLab <- ""
-    if (!is.null(v$zoom) && !is.null(rv$baseRes)) {
+    # fixed mode -> show the pinned resolution; auto mode -> the zoom-driven one
+    if (isFALSE(input$map_res_auto) && !is.null(rv$res_all) &&
+        !is.null(input$map_res_idx)) {
+      resLab <- sprintf(tr("coord_res"), fmt_res(rv$res_all[input$map_res_idx]))
+    } else if (!is.null(v$zoom) && !is.null(rv$baseRes)) {
       nz  <- max(0, min(round(v$zoom), rv$maxZoom))
       bpp <- rv$baseRes * 2^(rv$maxZoom - nz)
       res <- rv$res_all[which.min(abs(log2(rv$res_all) - log2(bpp)))]
-      resLab <- sprintf(tr("coord_res"),
-                        if (res >= 1000) paste0(res / 1000, " kb") else paste0(res, " bp"))
+      resLab <- sprintf(tr("coord_res"), fmt_res(res))
     }
     nameLab <- if (!is.null(rv$sample_name) && nzchar(rv$sample_name))
                  paste0(sprintf(tr("coord_sample"), rv$sample_name), "   ") else ""

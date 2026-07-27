@@ -90,6 +90,9 @@ LANG_STRINGS <- list(
     # Display panel
     disp_palette   = "Palette",
     disp_tab_map   = "Map",
+    disp_res         = "Map resolution",
+    disp_res_auto    = "Auto (switch resolution with zoom)",
+    disp_res_cur     = "Selected: %s",
     set_app_desc   = "App settings: menu URL, track list, language.",
     disp_open_first = "Open a map first.",
     disp_maxval    = "Max value",
@@ -292,6 +295,9 @@ LANG_STRINGS <- list(
     # Display panel
     disp_palette   = "カラーパレット",
     disp_tab_map   = "マップ",
+    disp_res         = "マップ解像度",
+    disp_res_auto    = "自動（拡大に応じて解像度を切替）",
+    disp_res_cur     = "選択中: %s",
     set_app_desc   = "アプリ設定：メニューURL・トラックリスト・表示言語。",
     disp_open_first = "先にマップを開いてください。",
     disp_maxval    = "最大値",

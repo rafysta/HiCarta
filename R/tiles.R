@@ -21,6 +21,12 @@ choose_res <- function(bpp, res_asc) {
   res_asc[which.min(abs(log2(res_asc) - log2(bpp)))]
 }
 
+# human-readable resolution label, e.g. 10000 -> "10 kb", 500 -> "500 bp"
+fmt_res <- function(res) {
+  if (is.null(res) || !is.finite(res)) return("")
+  if (res >= 1000) paste0(res / 1000, " kb") else paste0(res, " bp")
+}
+
 blank_tile <- function(st) {
   if (!is.null(st$blank)) return(st$blank)
   f <- tempfile(fileext = ".png")
@@ -38,7 +44,14 @@ render_tile <- function(st, z, x, y) {
   if (x0 >= st$chrlen || y0 >= st$chrlen || x1 <= 0 || y1 <= 0)
     return(blank_tile(st))
 
-  res <- choose_res(bpp, st$res)
+  # resolution: auto (matched to the tile's bp-per-pixel) or a user-fixed value
+  # that stays constant regardless of the view area. Snap the fixed value to an
+  # available resolution for safety.
+  res <- if (isTRUE(st$autoRes) || is.null(st$fixedRes)) {
+    choose_res(bpp, st$res)
+  } else {
+    st$res[which.min(abs(st$res - st$fixedRes))]
+  }
   xs <- max(1, floor(x0) + 1); xe <- min(st$chrlen, ceiling(x1))
   ys <- max(1, floor(y0) + 1); ye <- min(st$chrlen, ceiling(y1))
   if (xe <= xs || ye <= ys) return(blank_tile(st))
