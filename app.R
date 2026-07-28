@@ -29,6 +29,7 @@ source("R/tiles.R",       local = TRUE)
 source("R/tracks.R",      local = TRUE)
 source("R/genes.R",       local = TRUE)
 source("R/borderstrength.R", local = TRUE)
+source("R/chrominfo.R",    local = TRUE)
 source("R/export.R",       local = TRUE)
 
 APP_VERSION <- "4.0 (2026-07)"
@@ -147,11 +148,26 @@ function(el, x) {
   map.on('move zoom moveend zoomend resize viewreset', drawRulers);
   map.on('moveend', report);
 
+  // How tall the map may be: from its own top edge down to the bottom of the
+  // window, minus whatever is stacked below it (tracks).
+  //
+  // getBoundingClientRect().top is measured from the VIEWPORT, not the document,
+  // so on a scrolled page (which is easy to get when the side panel is long) the
+  // map's top sits above the viewport, `top` goes negative and the height comes
+  // out larger than the window. Scroll back to the top before measuring and
+  // clamp both ends so the result can never exceed the window.
+  function availH(reserve){
+    window.scrollTo(0, 0);
+    var c = map.getContainer();
+    var top = Math.max(0, c.getBoundingClientRect().top);
+    var h = Math.floor(window.innerHeight - top - (reserve || 0) - 16);
+    return Math.max(200, Math.min(h, window.innerHeight - 16));
+  }
+
   // size the map to fill the window on first load (like Auto adjust, 0 tracks)
   function autoSize(){
     var c = map.getContainer();
-    var top = c.getBoundingClientRect().top;
-    var h = Math.max(200, Math.floor(window.innerHeight - top - 16));
+    var h = availH(0);
     c.style.height = h + 'px';
     map.invalidateSize(); drawRulers();
     Shiny.setInputValue('auto_map_height', h, {priority: 'event'});
@@ -193,6 +209,8 @@ function(el, x) {
     map.fitBounds([[l1.lat,l1.lng],[l2.lat,l2.lng]]); });
 
   // ---- tile layer ----
+  // options.sample picks which .hic the server renders: 'a' (default) or 'b'.
+  // The curtain view adds a second instance with sample:'b' on top of the first.
   var TileLayer = L.GridLayer.extend({
     createTile: function(coords, done){
       var img = document.createElement('img');
@@ -202,33 +220,211 @@ function(el, x) {
       var sep = url.indexOf('?')>=0 ? '&' : '?';
       img.onload  = function(){ done(null,img); };
       img.onerror = function(){ done(null,img); };
-      img.src = url + sep + 'z=' + coords.z + '&x=' + coords.x + '&y=' + coords.y + '&v=' + window._tileVer;
+      img.src = url + sep + 'z=' + coords.z + '&x=' + coords.x + '&y=' + coords.y +
+                '&v=' + window._tileVer + '&s=' + (this.options.sample || 'a');
       return img;
     }
   });
 
+  // ==== two-sample curtain =================================================
+  // Sample B gets its OWN tile layer stacked above sample A, and the two are
+  // clipped to opposite sides of a draggable vertical divider. Clipping happens
+  // entirely in the browser, so dragging is instant — no tiles are re-rendered.
+  //
+  // The clip rectangle is computed in LAYER coordinates (containerPointToLayer-
+  // Point), because the tile container is translated as the map is panned; it is
+  // therefore recomputed on every move/zoom. This is the same approach the
+  // leaflet-side-by-side plugin uses.
+  //
+  // Space blinks between the two samples full-screen. Flipping the whole image
+  // back and forth in place is far more sensitive to small differences than any
+  // side-by-side arrangement, so it is the real workhorse of this mode; the
+  // divider is for showing someone where to look.
+  window._curtainOn = false;
+  window._curtainRatio = 0.5;   // divider position as a fraction of map width
+  window._blink = 0;            // 0 = curtain, 1 = sample A only, 2 = sample B only
+  window._cmpNameA = 'A';
+  window._cmpNameB = 'B';
+
+  var curtainBar = L.DomUtil.create('div', 'hid-curtain', map.getContainer());
+  curtainBar.style.cssText = 'position:absolute;top:0;bottom:0;width:11px;'+
+    'margin-left:-5px;z-index:645;cursor:ew-resize;display:none;';
+  var curtainLine = document.createElement('div');
+  curtainLine.style.cssText = 'position:absolute;top:0;bottom:0;left:5px;width:2px;'+
+    'background:#333;';
+  curtainBar.appendChild(curtainLine);
+  // NOTE: MAP_JS is one big R string, so no double quotes may appear anywhere in
+  // here - the grip's inner bars are built with the DOM rather than innerHTML.
+  var curtainGrip = document.createElement('div');
+  curtainGrip.style.cssText = 'position:absolute;top:50%;left:-4px;width:19px;'+
+    'height:40px;margin-top:-20px;background:#fff;border:1px solid #333;'+
+    'border-radius:3px;box-shadow:0 1px 3px rgba(0,0,0,0.3);';
+  var curtainGripBars = document.createElement('div');
+  curtainGripBars.style.cssText = 'margin:14px 5px;height:12px;'+
+    'border-left:1px solid #777;border-right:1px solid #777;';
+  curtainGrip.appendChild(curtainGripBars);
+  curtainBar.appendChild(curtainGrip);
+
+  var blinkBadge = L.DomUtil.create('div', 'hid-blink', map.getContainer());
+  blinkBadge.style.cssText = 'position:absolute;top:30px;left:50%;'+
+    'transform:translateX(-50%);z-index:657;background:rgba(255,255,255,0.92);'+
+    'border:1px solid #333;border-radius:3px;padding:3px 10px;font:12px sans-serif;'+
+    'color:#111;pointer-events:none;display:none;';
+
+  function updateCurtain(){
+    if(!window._curtainOn) return;
+    var size = map.getSize();
+    var ratio = (window._blink === 1) ? 1 : (window._blink === 2) ? 0 : window._curtainRatio;
+    var nw = map.containerPointToLayerPoint([0, 0]);
+    var se = map.containerPointToLayerPoint([size.x, size.y]);
+    var cx = nw.x + (se.x - nw.x) * ratio;
+    var A = window._tileLayer  ? window._tileLayer.getContainer()  : null;
+    var B = window._tileLayerB ? window._tileLayerB.getContainer() : null;
+    // clip: rect(top, right, bottom, left)
+    if(A) A.style.clip = 'rect(' + [nw.y, cx,    se.y, nw.x].join('px,') + 'px)';
+    if(B) B.style.clip = 'rect(' + [nw.y, se.x,  se.y, cx  ].join('px,') + 'px)';
+    curtainBar.style.left = Math.round(ratio * size.x) + 'px';
+    curtainBar.style.display = (window._blink === 0) ? '' : 'none';
+  }
+
+  function clearCurtain(){
+    var A = window._tileLayer  ? window._tileLayer.getContainer()  : null;
+    var B = window._tileLayerB ? window._tileLayerB.getContainer() : null;
+    if(A) A.style.clip = '';
+    if(B) B.style.clip = '';
+    curtainBar.style.display = 'none';
+    blinkBadge.style.display = 'none';
+  }
+
+  // (Re)create the sample-B layer. Called both when the curtain is switched on
+  // and after a new map is opened, so the two are order-independent.
+  function rebuildCurtainLayer(){
+    if(window._tileLayerB){ map.removeLayer(window._tileLayerB); window._tileLayerB = null; }
+    if(!window._curtainOn || !window._tileOpts || !window._tileURL) return;
+    var o = {}; for(var k in window._tileOpts) o[k] = window._tileOpts[k];
+    o.sample = 'b'; o.zIndex = 400;          // above the sample-A layer
+    window._tileLayerB = new TileLayer(o);
+    window._tileLayerB.addTo(map);
+  }
+
+  function setBlink(v){
+    window._blink = v;
+    if(v === 0){ blinkBadge.style.display = 'none'; }
+    else {
+      blinkBadge.textContent = (v === 1) ? window._cmpNameA : window._cmpNameB;
+      blinkBadge.style.display = '';
+    }
+    placeCmpLabels(window._cmpLayout);
+    updateCurtain();
+  }
+
+  map.on('move zoom moveend zoomend resize viewreset', updateCurtain);
+
+  // ---- divider drag ----
+  var cDrag = false;
+  function curtainRatioFrom(e){
+    var r = map.getContainer().getBoundingClientRect();
+    var cx = (e.touches && e.touches.length ? e.touches[0].clientX : e.clientX) - r.left;
+    return Math.max(0, Math.min(1, cx / r.width));
+  }
+  L.DomEvent.on(curtainBar, 'mousedown', function(e){
+    cDrag = true; map.dragging.disable(); L.DomEvent.stop(e);
+  });
+  window.addEventListener('mousemove', function(e){
+    if(!cDrag) return;
+    window._blink = 0; blinkBadge.style.display = 'none';
+    window._curtainRatio = curtainRatioFrom(e);
+    updateCurtain();
+  });
+  window.addEventListener('mouseup', function(){
+    if(!cDrag) return;
+    cDrag = false; map.dragging.enable();
+    Shiny.setInputValue('cmp_ratio', window._curtainRatio, {priority: 'event'});
+  });
+
+  // ---- keyboard: Space blinks A <-> B, Escape returns to the curtain ----
+  document.addEventListener('keydown', function(e){
+    if(!window._curtainOn) return;
+    var t = e.target && e.target.tagName;
+    // Never steal Space from a focused control: on an input/select it types or
+    // toggles, and on a BUTTON it already activates the A/B button - handling it
+    // here as well would blink twice and look like nothing happened.
+    if(t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT' ||
+       t === 'BUTTON' || t === 'A') return;
+    if(document.querySelector('.modal.in')) return;                  // a dialog is open
+    if(e.code === 'Space' || e.key === ' ' || e.keyCode === 32){
+      e.preventDefault();
+      setBlink(window._blink === 1 ? 2 : 1);
+    } else if(e.key === 'Escape' || e.keyCode === 27){
+      setBlink(0);
+    }
+  });
+
+  Shiny.addCustomMessageHandler('setCurtain', function(msg){
+    var on  = !!(msg && msg.on);
+    // only rebuild the B layer when the mode actually flips, so tweaking e.g.
+    // the depth factor does not throw away tiles that were just fetched
+    var was = window._curtainOn && !!window._tileLayerB;
+    window._curtainOn = on;
+    if(msg && msg.ratio != null && isFinite(msg.ratio)) window._curtainRatio = msg.ratio;
+    if(on !== was){
+      window._blink = 0; blinkBadge.style.display = 'none';
+      rebuildCurtainLayer();
+    }
+    if(on) updateCurtain(); else clearCurtain();
+  });
+  Shiny.addCustomMessageHandler('blinkToggle', function(msg){
+    if(!window._curtainOn) return;
+    setBlink(window._blink === 1 ? 2 : 1);
+  });
+
+  // Show / hide the whole contact-map box. The map is hidden until a .hic is
+  // opened so that tracks can be viewed on their own; revealing it needs an
+  // invalidateSize() because Leaflet cannot measure a display:none container.
+  Shiny.addCustomMessageHandler('showMap', function(msg){
+    var box = document.getElementById('mapbox');
+    if(!box) return;
+    box.style.display = msg.show ? '' : 'none';
+    if(msg.show){ map.invalidateSize(); autoSize(); }
+  });
+
   Shiny.addCustomMessageHandler('initTiles', function(msg){
+    // The map box may have just been revealed, so let the browser lay it out
+    // first: fitBounds on a zero-size container gives the wrong view.
+    map.invalidateSize();
+    setTimeout(function(){
+    map.invalidateSize();
     window._tileURL = msg.url;
     window._scale   = msg.scale;
     window._tileVer = msg.ver;   // cache-buster: forces fresh tiles per Open
     map.setMinZoom(0); map.setMaxZoom(msg.mapMaxZoom);
     if(window._tileLayer){ map.removeLayer(window._tileLayer); window._tileLayer=null; }
     var U = msg.U;   // map-unit extent of the chromosome
-    window._tileLayer = new TileLayer({
+    // kept so the curtain's sample-B layer can be built with the same geometry
+    window._tileOpts = {
       tileSize: 256, noWrap: true,
       bounds: L.latLngBounds([[-U,0],[0,U]]),
       minZoom: 0, maxZoom: msg.mapMaxZoom,          // allow over-zoom (upscaled)
       minNativeZoom: 0, maxNativeZoom: msg.maxZoom, // finest real tiles
-      keepBuffer: 0                                 // only render visible tiles first (single-threaded R)
-    });
+      keepBuffer: 0,                                // only render visible tiles first (single-threaded R)
+      sample: 'a', zIndex: 300
+    };
+    window._tileLayer = new TileLayer(window._tileOpts);
     window._tileLayer.addTo(map);
+    rebuildCurtainLayer();       // no-op unless the curtain is currently on
     map.setMaxBounds(L.latLngBounds([[-U*1.05,-0.05*U],[0.05*U,U*1.05]]));
     map.fitBounds([[toLat(msg.fy1), toLng(msg.fx0)],[toLat(msg.fy0), toLng(msg.fx1)]]);
-    report(); drawRulers();
+    report(); drawRulers(); updateCurtain();
+    }, 60);
+  });
+  Shiny.addCustomMessageHandler('zoomBy', function(msg){
+    map.setZoom(map.getZoom() + msg.d);
   });
   Shiny.addCustomMessageHandler('redrawTiles', function(msg){
     if(msg.ver != null) window._tileVer = msg.ver;   // fresh URLs so tiles actually refresh
     if(window._tileLayer){ window._tileLayer.redraw(); }
+    if(window._tileLayerB){ window._tileLayerB.redraw(); }
+    updateCurtain();
   });
   Shiny.addCustomMessageHandler('gotoRegion', function(msg){
     window._scale = msg.scale;
@@ -254,8 +450,7 @@ function(el, x) {
   });
   Shiny.addCustomMessageHandler('fitMap', function(msg){
     var c = map.getContainer();
-    var top = c.getBoundingClientRect().top;
-    var h = Math.max(200, Math.floor(window.innerHeight - top - msg.tracksTotal - 16));
+    var h = availH(msg.tracksTotal);
     c.style.height = h + 'px';
     map.invalidateSize();
     report(); drawRulers();
@@ -263,9 +458,7 @@ function(el, x) {
   });
   Shiny.addCustomMessageHandler('autoAdjust', function(msg){
     var c = map.getContainer();
-    var top = c.getBoundingClientRect().top;             // viewport-top -> map-top
-    var tracks = msg.ntracks * (msg.perTrack + 6);        // stacked tracks below
-    var h = Math.max(200, Math.floor(window.innerHeight - top - tracks - 16));
+    var h = availH(msg.ntracks * (msg.perTrack + 6));    // tracks stacked below
     c.style.height = h + 'px';
     map.invalidateSize();
     report(); drawRulers();
@@ -283,6 +476,54 @@ function(el, x) {
     var i = Math.round(n) - 1, L = window._resLabels;
     return (L && L[i] != null) ? L[i] : n;
   };
+  // ---- two-sample comparison labels ----
+  // In split view the map shows sample A above the diagonal and sample B below
+  // it, so which sample is where must always be visible (screenshots of the map
+  // travel on their own). Two small captions sit in the corresponding corners.
+  var CMP_CSS = 'position:absolute;z-index:655;background:rgba(255,255,255,0.88);'+
+    'border:1px solid #bbb;border-radius:3px;padding:2px 7px;font:12px sans-serif;'+
+    'color:#222;pointer-events:none;display:none;';
+  var cmpA = L.DomUtil.create('div', 'hid-cmp', map.getContainer());
+  cmpA.style.cssText = CMP_CSS;
+  var cmpB = L.DomUtil.create('div', 'hid-cmp', map.getContainer());
+  cmpB.style.cssText = CMP_CSS;
+  window._cmpLayout = 'split';
+
+  // Corner placement follows the mode: the split view puts A above the diagonal
+  // and B below it; the curtain puts A on the left and B on the right. While
+  // blinking, the centre badge names the sample instead, so both are hidden.
+  // (Declared as a function so setBlink above can call it - hoisted.)
+  function placeCmpLabels(layout){
+    ['top','bottom','left','right'].forEach(function(p){
+      cmpA.style[p] = ''; cmpB.style[p] = '';
+    });
+    if(layout === 'curtain'){
+      cmpA.style.top = '30px'; cmpA.style.left  = '8px';
+      cmpB.style.top = '30px'; cmpB.style.right = '74px';
+    } else {
+      // split and diff both put the primary caption in the top-right corner;
+      // diff leaves the B caption empty (there is no B half to point at)
+      cmpA.style.top    = '30px'; cmpA.style.right = '74px';
+      cmpB.style.bottom = '8px';  cmpB.style.left  = '8px';
+    }
+    var hide = (layout === 'curtain' && window._blink !== 0);
+    var on = window._cmpShow && !hide;
+    cmpA.style.display = (on && cmpA.textContent) ? '' : 'none';
+    cmpB.style.display = (on && cmpB.textContent) ? '' : 'none';
+  }
+
+  Shiny.addCustomMessageHandler('setCmpLabels', function(msg){
+    window._cmpShow   = !!(msg && msg.show);
+    window._cmpLayout = (msg && msg.mode) ? msg.mode : 'split';
+    if(msg){
+      cmpA.textContent = msg.a || '';
+      cmpB.textContent = msg.b || '';
+      window._cmpNameA = msg.na || msg.a || 'A';
+      window._cmpNameB = msg.nb || msg.b || 'B';
+    }
+    placeCmpLabels(window._cmpLayout);
+  });
+
   Shiny.addCustomMessageHandler('setResLabels', function(msg){
     window._resLabels = msg.labels || [];
     // The slider is rebuilt by renderUI on each Open, so keep re-applying the
@@ -331,20 +572,63 @@ ui <- function(request) {
     ".loader-btn:hover{background:#eee; color:#337ab7}",
     ".loader-btn.active{background:#337ab7; color:#fff}",
     ".pan-pad .btn{width:44px; padding:4px 0; font-size:14px}",
-    ".pan-pad .btn.home{color:#337ab7}"))),
+    ".pan-pad .btn.home{color:#337ab7}",
+    # ---- collapsible side panel ----
+    # The toggle button always stays visible as the left-most item of #topnav;
+    # collapsing hides the rest of the menu and the whole side column, and lets
+    # the main column take the full page width.
+    "#ui_collapse_btn{background:#fff; color:#555; border:1px solid #ccc;",
+    "  border-radius:4px; padding:5px 11px; font-size:16px; line-height:1.2;",
+    "  cursor:pointer}",
+    "#ui_collapse_btn:hover{background:#eee; color:#222}",
+    "#topnav_items{display:flex; align-items:center; gap:12px}",
+    "body.ui-collapsed #topnav_items{display:none}",
+    "body.ui-collapsed #side_col{display:none}",
+    "body.ui-collapsed #main_col{width:100%; max-width:100%; flex:0 0 100%}"))),
+  # Toggling is pure client-side (no Shiny round-trip) so the map and tracks are
+  # never rebuilt — a synthetic window resize is enough: Leaflet re-measures via
+  # trackResize and Shiny re-renders the track plots at the new width.
+  tags$head(tags$script(HTML("
+    window.hidToggleSidebar = function(){
+      var on = document.body.classList.toggle('ui-collapsed');
+      var b = document.getElementById('ui_collapse_btn');
+      if (b) b.title = on ? b.getAttribute('data-expand')
+                          : b.getAttribute('data-collapse');
+      try { sessionStorage.setItem('hid_collapsed', on ? '1' : '0'); } catch(e){}
+      setTimeout(function(){ window.dispatchEvent(new Event('resize')); }, 50);
+      setTimeout(function(){ window.dispatchEvent(new Event('resize')); }, 250);
+    };
+    // keep the collapsed state across a session$reload() (Setting -> Apply)
+    document.addEventListener('DOMContentLoaded', function(){
+      try {
+        if (sessionStorage.getItem('hid_collapsed') === '1') {
+          document.body.classList.add('ui-collapsed');
+          var b = document.getElementById('ui_collapse_btn');
+          if (b) b.title = b.getAttribute('data-expand');
+        }
+      } catch(e){}
+    });
+  "))),
   titlePanel("HiCarta"),
   div(id = "topnav",
-    # single entry point for all data loading (opens the overlay below)
-    tags$button(id = "open_loader_btn", type = "button", class = "btn loader-btn",
-      onclick = paste0("Shiny.setInputValue('loader_open', true, {priority:'event'});",
-                       "this.classList.add('active');"),
-      HTML("&#128194; "), tr("nav_data")),
-    tabsetPanel(id = "nav", type = "pills", selected = "Region",
-      tabPanel(tr("nav_region"),  value = "Region"),
-      tabPanel(tr("nav_display"), value = "Display"),
-      tabPanel(tr("nav_print"),   value = "Print"),
-      tabPanel(tr("nav_setting"), value = "Setting"),
-      tabPanel(tr("nav_about"),   value = "About"))),
+    # left-most: fold / unfold the side panel (stays visible when collapsed)
+    tags$button(id = "ui_collapse_btn", type = "button",
+      title = tr("ui_collapse"),
+      `data-collapse` = tr("ui_collapse"), `data-expand` = tr("ui_expand"),
+      `aria-label` = tr("ui_collapse"),
+      onclick = "window.hidToggleSidebar();", HTML("&#9776;")),
+    div(id = "topnav_items",
+      # single entry point for all data loading (opens the overlay below)
+      tags$button(id = "open_loader_btn", type = "button", class = "btn loader-btn",
+        onclick = paste0("Shiny.setInputValue('loader_open', true, {priority:'event'});",
+                         "this.classList.add('active');"),
+        HTML("&#128194; "), tr("nav_data")),
+      tabsetPanel(id = "nav", type = "pills", selected = "Region",
+        tabPanel(tr("nav_region"),  value = "Region"),
+        tabPanel(tr("nav_display"), value = "Display"),
+        tabPanel(tr("nav_print"),   value = "Print"),
+        tabPanel(tr("nav_setting"), value = "Setting"),
+        tabPanel(tr("nav_about"),   value = "About")))),
 
   # ---- data-loading overlay ("modal"): Hi-C + track loading in two tabs. ----
   # It is always in the DOM (so menu/sample selections survive close/reopen) and
@@ -379,6 +663,24 @@ ui <- function(request) {
               hr(),
               actionButton("open", tr("data_open"), class = "btn-primary btn-block"),
               verbatimTextOutput("status"))),
+          # -- second Hi-C sample, drawn in the lower-left half of the map --
+          tabPanel(tr("data_loader_cmp"),
+            div(style = "padding-top:12px;",
+              tags$p(tags$small(tr("cmp_intro"))),
+              selectInput("sample_sel_b", tr("cmp_sample"), NULL),
+              selectInput("dataset_sel_b", tr("cmp_dataset"), NULL),
+              selectInput("norm_b", tr("cmp_norm"), c("NONE"), "NONE"),
+              hr(),
+              tags$b(tr("cmp_local_hic")),
+              textInput("hic_local_b", tr("cmp_hic_path"), ""),
+              if (HAS_SHINYFILES)
+                shinyFiles::shinyFilesButton("hic_file_btn_b", tr("data_hic_browse"),
+                                             tr("data_hic_browse_title"),
+                                             multiple = FALSE, class = "btn-sm"),
+              hr(),
+              actionButton("open_b", tr("cmp_open"), class = "btn-primary btn-block"),
+              actionButton("clear_b", tr("cmp_clear"), class = "btn-sm btn-block"),
+              verbatimTextOutput("status_b"))),
           tabPanel(tr("nav_tracks"),
             div(style = "padding-top:12px;",
               textInput("trk_xml", tr("trk_xml_url"), value = DEFAULT_TRACKLIST),
@@ -410,8 +712,12 @@ ui <- function(request) {
               hr(),
               fileInput("session_file", tr("session_load"), accept = ".json"))))))),
 
-  sidebarLayout(
-    sidebarPanel(width = 3,
+  # Same markup sidebarLayout() would emit, but with ids on both columns so the
+  # collapse toggle (see #ui_collapse_btn above) can hide the side column and
+  # give the map the full width.
+  fluidRow(
+    div(id = "side_col", class = "col-sm-3",
+      tags$form(class = "well", role = "complementary",
       conditionalPanel("input.nav == 'Region'",
         selectInput("chr", tr("region_chr"), c("I", "II", "III"), "II"),
         fluidRow(column(6, numericInput("start", tr("region_ystart"), 1)),
@@ -434,10 +740,14 @@ ui <- function(request) {
             actionButton("pan_left",   HTML("&#9664;"), class = "btn-sm", title = tr("region_pan_left")),
             actionButton("view_whole", HTML("&#8962;"), class = "btn-sm home", title = tr("region_whole")),
             actionButton("pan_right",  HTML("&#9654;"), class = "btn-sm", title = tr("region_pan_right"))),
-          div(style = "display:flex; gap:4px; justify-content:center;",
+          div(style = "display:flex; gap:4px; justify-content:center; margin-bottom:4px;",
             actionButton("pan_dl", HTML("&#8601;"), class = "btn-sm", title = tr("region_pan_dl")),
             actionButton("pan_down", HTML("&#9660;"), class = "btn-sm", title = tr("region_pan_down")),
-            actionButton("pan_dr", HTML("&#8600;"), class = "btn-sm", title = tr("region_pan_dr")))),
+            actionButton("pan_dr", HTML("&#8600;"), class = "btn-sm", title = tr("region_pan_dr"))),
+          # zoom the visible range (works with or without a contact map)
+          div(style = "display:flex; gap:4px; justify-content:center;",
+            actionButton("zoom_out", HTML("&#8722;"), class = "btn-sm", title = tr("region_zoom_out")),
+            actionButton("zoom_in",  HTML("&#43;"),   class = "btn-sm", title = tr("region_zoom_in")))),
         hr(),
         # bookmarks: star the current view, jump back to it later
         tags$label(tr("bm_title")),
@@ -463,6 +773,11 @@ ui <- function(request) {
                 column(6, div(style = "margin-top:25px;",
                               actionButton("fit_map", tr("set_fit"), class = "btn-sm")))),
               actionButton("apply_map", tr("set_apply"), class = "btn-sm btn-primary"))),
+          # -- two-sample comparison: kept in its own tab so the Map tab stays
+          #    short enough that the side panel never outgrows the window --
+          tabPanel(tr("disp_tab_cmp"),
+            div(style = "padding-top:12px;",
+              uiOutput("cmp_controls"))),
           # -- track display: resolution + per-track name/color/height/max/agg --
           tabPanel(tr("nav_tracks"),
             div(style = "padding-top:12px;",
@@ -495,8 +810,8 @@ ui <- function(request) {
           tags$li(tr("about_feat4"))),
         tags$hr(),
         p(tags$small(tr("about_built"))))
-    ),
-    mainPanel(width = 9,
+    )),
+    div(id = "main_col", class = "col-sm-9", role = "main",
       # fixed-height info area so the map does not shift when hover text appears
       div(style = "height: 42px; line-height: 1.35; overflow: hidden;",
         strong(textOutput("coord", inline = TRUE)), br(),
@@ -505,7 +820,9 @@ ui <- function(request) {
       # line can span both. Tracks share the map's x-range; the right 66px gutter
       # mirrors the map's y-ruler so a track's width matches the contact map's.
       div(id = "mapwrap", style = "position: relative;",
-        leafletOutput("map", height = "720px"),
+        # hidden until a .hic is opened, so tracks can be viewed on their own
+        div(id = "mapbox", style = "display:none;",
+            leafletOutput("map", height = "720px")),
         div(style = "position: relative;",
           uiOutput("tracks_ui"),
           div(style = paste0("position:absolute; top:0; right:0; bottom:0; width:66px;",
@@ -521,8 +838,58 @@ server <- function(input, output, session) {
                        tileURL = NULL, tracks = list(), trk_seq = 0, trk_bins = 1000,
                        trk_msg = "", sample_name = NULL, restore_vmax = NULL,
                        bookmarks = list(), bm_seq = 0L,
-                       exp_key = NULL, exp_data = NULL, exp_msg = "")
+                       exp_key = NULL, exp_data = NULL, exp_msg = "",
+                       # ---- two-sample comparison (sample B) ----
+                       # has_b    : TRUE once a comparison .hic has been loaded
+                       # ov_b     : B's overview matrix (same region as rv$ov)
+                       # bfac     : factor applied to B to match A's depth
+                       # res_all_a: A's own resolution list; rv$res_all becomes
+                       #            the INTERSECTION while B is loaded
+                       has_b = FALSE, ov_b = NULL, ov_b_res = NULL,
+                       sample_name_b = NULL, bfac = 1, bfac_auto = 1,
+                       res_all_a = NULL, cmp_msg = "",
+                       # ---- track-only mode (no Hi-C map loaded) ----
+                       # has_hic  : TRUE once a .hic has been opened
+                       # chrinfo  : named vector chr -> length, read from the
+                       #            first track file (see R/chrominfo.R)
+                       # tv_x0/x1 : the visible range in that mode (the map
+                       #            normally supplies it via input$map_view)
+                       has_hic = FALSE, chrinfo = NULL, tv_x0 = NULL, tv_x1 = NULL)
   st <- new.env()   # tile-render state shared with the tile HTTP handler
+
+  # length of a chromosome in track-only mode (NULL when unknown)
+  chrinfo_len <- function(chr) {
+    ci <- rv$chrinfo
+    if (is.null(ci) || is.null(chr) || !(chr %in% names(ci))) return(NULL)
+    as.numeric(ci[[chr]])
+  }
+
+  # ---- the visible x-range, whichever mode we are in ------------------------
+  # With a contact map the range comes from the map itself (pan/zoom); without
+  # one it is the track-only range driven by the Navigate panel.
+  view_range <- reactive({
+    if (isTRUE(rv$has_hic)) {
+      v <- input$map_view
+      if (is.null(v)) return(NULL)
+      list(west = v$west, east = v$east)
+    } else {
+      if (is.null(rv$tv_x0) || is.null(rv$tv_x1)) return(NULL)
+      list(west = rv$tv_x0, east = rv$tv_x1)
+    }
+  })
+
+  # Move the track-only view, keeping the Navigate boxes in sync.
+  set_track_view <- function(chr, x0, x1) {
+    if (is.null(chr)) return()
+    len <- chrinfo_len(chr)
+    if (is.null(len)) len <- as.numeric(x1)
+    x0 <- max(1, as.numeric(x0)); x1 <- min(len, as.numeric(x1))
+    if (!is.finite(x0) || !is.finite(x1) || x1 <= x0) { x0 <- 1; x1 <- len }
+    rv$chr <- chr; rv$chrlen <- len
+    rv$tv_x0 <- x0; rv$tv_x1 <- x1
+    updateNumericInput(session, "start", value = round(x0))
+    updateNumericInput(session, "end",   value = round(x1))
+  }
 
   # ---- local file pickers (shinyFiles) ----
   # Browses the machine running the app (= the user's own computer for the
@@ -539,6 +906,16 @@ server <- function(input, output, session) {
                      error = function(e) NULL)
       if (!is.null(fp) && nrow(fp) > 0)
         updateTextInput(session, "hic_local", value = as.character(fp$datapath[1]))
+    })
+
+    # same picker for the comparison sample (B)
+    shinyFiles::shinyFileChoose(input, "hic_file_btn_b", roots = sf_roots,
+                                filetypes = c("hic"))
+    observeEvent(input$hic_file_btn_b, {
+      fp <- tryCatch(shinyFiles::parseFilePaths(sf_roots, input$hic_file_btn_b),
+                     error = function(e) NULL)
+      if (!is.null(fp) && nrow(fp) > 0)
+        updateTextInput(session, "hic_local_b", value = as.character(fp$datapath[1]))
     })
 
     # Tracks: accept bigWig, BED and gene-model extensions (both letter cases).
@@ -573,6 +950,8 @@ server <- function(input, output, session) {
       m <- parse_juicer_menu(lines); rv$menu <- m
       samp <- unique(m[, c("sample_id", "sample_label")])
       updateSelectInput(session, "sample_sel", choices = setNames(samp$sample_id, samp$sample_label))
+      # the comparison tab picks from the same menu
+      updateSelectInput(session, "sample_sel_b", choices = setNames(samp$sample_id, samp$sample_label))
       rv$msg <- sprintf(tr("msg_loaded_samp"), nrow(samp))
     }, error = function(e) rv$msg <- sprintf(tr("msg_menu_err"), conditionMessage(e)))
   })
@@ -589,6 +968,19 @@ server <- function(input, output, session) {
     path <- input$dataset_sel
     if (is.null(path) || !nzchar(path)) return()
     updateSelectInput(session, "normalization",
+                      choices = c("NONE", "KR", "VC", "VC_SQRT"), selected = "NONE")
+  }, ignoreInit = TRUE)
+
+  # ---- comparison sample (B): same two-step menu selection as A ----
+  observeEvent(input$sample_sel_b, {
+    req(rv$menu)
+    sub <- rv$menu[rv$menu$sample_id == input$sample_sel_b, ]
+    updateSelectInput(session, "dataset_sel_b", choices = setNames(sub$url, sub$dataset_label))
+  })
+  observeEvent(input$dataset_sel_b, {
+    path <- input$dataset_sel_b
+    if (is.null(path) || !nzchar(path)) return()
+    updateSelectInput(session, "norm_b",
                       choices = c("NONE", "KR", "VC", "VC_SQRT"), selected = "NONE")
   }, ignoreInit = TRUE)
 
@@ -635,15 +1027,23 @@ server <- function(input, output, session) {
       setView(0, 0, 0) |>
       onRender(MAP_JS)
   })
+  # The contact map is hidden (#mapbox display:none) until a .hic is opened so
+  # that tracks can be viewed on their own. It must keep rendering while hidden,
+  # otherwise the Leaflet widget would not exist yet — and its custom-message
+  # handlers would not be registered — when the first "initTiles" arrives.
+  outputOptions(output, "map", suspendWhenHidden = FALSE)
 
   register_tiles <- function() {
     if (!is.null(rv$tileURL)) return(rv$tileURL)
     rv$tileURL <- session$registerDataObj("tiles", st, function(data, req) {
       q <- shiny::parseQueryString(req$QUERY_STRING)
       z <- as.integer(q$z); x <- as.integer(q$x); y <- as.integer(q$y)
+      # s=a -> sample A (or the merged split view); s=b -> sample B alone, asked
+      # for by the curtain view's second tile layer
+      src <- if (identical(q$s, "b")) "b" else "a"
       bytes <- tryCatch(
-        render_tile(data, z, x, y),
-        error = function(e) { message(sprintf("[tile ERROR] z=%s x=%s y=%s : %s", z, x, y, conditionMessage(e))); blank_tile(data) })
+        render_tile(data, z, x, y, src = src),
+        error = function(e) { message(sprintf("[tile ERROR] z=%s x=%s y=%s s=%s : %s", z, x, y, src, conditionMessage(e))); blank_tile(data) })
       shiny:::httpResponse(200L, "image/png", bytes)
     })
     message("[tiles] registered at URL: ", rv$tileURL)
@@ -667,6 +1067,12 @@ server <- function(input, output, session) {
                       vmax = NULL) {
     if (is.null(src)) { rv$msg <- tr("msg_pick_src"); return() }
     tryCatch({
+      # A comparison sample is tied to A's chromosome and resolution set, both of
+      # which are about to change. Detach it now and re-attach (re-validating it
+      # against the new chromosome) once A is open.
+      keep_b_src  <- rv$src_b
+      keep_b_norm <- rv$norm_b
+      clear_cmp(restore_res = FALSE)
       # remote URLs are downloaded once and read locally; local paths pass through
       withProgress(message = tr("prog_cache_hic"), value = 0.3, {
         path <- tryCatch(hic_local(src),
@@ -747,25 +1153,361 @@ server <- function(input, output, session) {
                       chr, chrlen, baseRes, maxZoom, mapMaxZoom, SCALE, Umap))
       fx0 <- max(1, start);  fx1 <- min(chrlen, end)
       fy0 <- max(1, ystart); fy1 <- min(chrlen, yend)
+      # leaving track-only mode: reveal the contact map, then (re)fit the
+      # layout so map + tracks share the window as usual.
+      first_map <- !isTRUE(rv$has_hic)
+      rv$has_hic <- TRUE
+      rv$tv_x0 <- NULL; rv$tv_x1 <- NULL
+      session$sendCustomMessage("showMap", list(show = TRUE))
       session$sendCustomMessage("initTiles", list(
         url = url, scale = SCALE, U = Umap, maxZoom = maxZoom, mapMaxZoom = mapMaxZoom,
         ver = ver, chrlen = chrlen, fx0 = fx0, fy0 = fy0, fx1 = fx1, fy1 = fy1))
       rv$msg <- sprintf(tr("msg_ready"),
                         chr, format(chrlen, big.mark = ","),
                         paste(res_all, collapse = "/"))
+      if (first_map && length(rv$tracks) > 0) {
+        tot <- sum(vapply(rv$tracks, function(t) as.numeric(t$height) + 6, numeric(1)))
+        session$sendCustomMessage("fitMap", list(tracksTotal = tot))
+      }
       session$sendCustomMessage("closeLoader", list())   # reveal the map
+      # re-attach the comparison sample to the newly opened chromosome
+      if (!is.null(keep_b_src) && nzchar(keep_b_src))
+        do_open_b(src = keep_b_src, norm = keep_b_norm)
     }, error = function(e) rv$msg <- sprintf(tr("msg_open_err"), conditionMessage(e)))
   }
   observeEvent(input$open, do_open())
+
+  # =========================================================================
+  # Two-sample comparison
+  # -------------------------------------------------------------------------
+  # A second .hic ("sample B") is drawn in the LOWER-LEFT half of the same map
+  # while sample A keeps the upper-right half. Because a Hi-C matrix is
+  # symmetric, (x,y) above the diagonal and (y,x) below it are the same locus
+  # pair — so the two halves show the same interactions for both samples, at one
+  # resolution, one palette and one value scale.
+  #
+  # Three things must line up or the comparison is meaningless, and all three
+  # are checked when B is loaded:
+  #   * same chromosome and same chromosome length (same genome build),
+  #   * a resolution present in BOTH files (st$res becomes the intersection),
+  #   * matched sequencing depth (B is multiplied by st$bfac).
+  # =========================================================================
+
+  # the B source: a local file path takes priority, else the menu dataset URL
+  current_src_b <- function() {
+    if (!is.null(input$hic_local_b) && nzchar(input$hic_local_b)) input$hic_local_b
+    else if (!is.null(input$dataset_sel_b) && nzchar(input$dataset_sel_b)) input$dataset_sel_b
+    else NULL
+  }
+
+  # Total contact count of an overview matrix. Summed over a whole chromosome
+  # this is essentially the number of contacts whatever the bin size, so the
+  # ratio of two totals is a resolution-independent depth factor.
+  total_counts <- function(m) {
+    if (is.null(m)) return(NA_real_)
+    v <- as.numeric(m); v <- v[is.finite(v)]
+    if (!length(v)) return(NA_real_)
+    sum(v)
+  }
+
+  # Drop the comparison sample. `restore_res = TRUE` puts the resolution list
+  # back to sample A's own (it is narrowed to the shared set while B is loaded);
+  # do_open() passes FALSE because it sets a fresh list itself.
+  clear_cmp <- function(restore_res = TRUE, msg = NULL) {
+    rv$has_b <- FALSE; rv$ov_b <- NULL; rv$ov_b_res <- NULL
+    rv$path_b <- NULL; rv$norm_b <- NULL
+    rv$sample_name_b <- NULL; rv$bfac_auto <- 1; rv$bfac <- 1
+    if (restore_res && !is.null(rv$res_all_a)) {
+      st$res <- rv$res_all_a
+      rv$res_prog <- TRUE
+      rv$res_all  <- rv$res_all_a
+    }
+    rv$res_all_a <- NULL
+    st$path2 <- NULL; st$norm2 <- NULL; st$bfac <- 1
+    st$cmpMode <- "single"; st$cmpDiag <- FALSE
+    session$sendCustomMessage("setCmpLabels", list(show = FALSE))
+    session$sendCustomMessage("setCurtain", list(on = FALSE))
+    if (!is.null(msg)) rv$cmp_msg <- msg
+    invisible(NULL)
+  }
+
+  # Push the current comparison settings into the tile state and redraw. Reads
+  # the Display controls, which may not exist yet right after B is loaded — the
+  # NULL fallbacks are the defaults the controls are created with.
+  apply_cmp <- function(redraw = TRUE) {
+    mode <- "single"
+    if (isTRUE(rv$has_b)) {
+      mode <- input$cmp_mode  %||% rv$cmp_mode_def  %||% "split"
+      dep  <- input$cmp_depth %||% rv$cmp_depth_def %||% TRUE
+      dia  <- input$cmp_diag  %||% rv$cmp_diag_def  %||% TRUE
+      bf   <- if (isTRUE(dep)) rv$bfac_auto
+              else (input$cmp_factor %||% rv$cmp_factor_def)
+      if (is.null(bf) || length(bf) != 1 || !is.finite(bf) || bf <= 0) bf <- 1
+      st$path2 <- rv$path_b; st$norm2 <- rv$norm_b
+      st$bfac <- bf; st$cmpMode <- mode; st$cmpDiag <- isTRUE(dia)
+      rv$bfac <- bf
+
+      # ---- difference-map settings ----
+      # The limit is kept in a separate box per formula (log2 fold change and a
+      # raw count difference are in different units), so switching the formula
+      # never carries a nonsensical number across.
+      dtype <- input$cmp_diff_type %||% rv$cmp_dtype_def %||% "log2"
+      dlim  <- if (identical(dtype, "sub"))
+                 (input$cmp_diff_lim_sub  %||% rv$cmp_dlim_sub_def  %||% rv$diff_lim_sub)
+               else
+                 (input$cmp_diff_lim_log2 %||% rv$cmp_dlim_log2_def %||% rv$diff_lim_log2)
+      deps  <- input$cmp_diff_eps %||% rv$cmp_deps_def %||% rv$diff_eps_auto
+      if (is.null(dlim) || length(dlim) != 1 || !is.finite(dlim) || dlim <= 0) dlim <- 1
+      if (is.null(deps) || length(deps) != 1 || !is.finite(deps) || deps <= 0) deps <- 1
+      st$diffType  <- dtype
+      st$diffLim   <- dlim
+      st$diffEps   <- deps
+      st$diffColor <- input$cmp_diff_color %||% rv$cmp_dcol_def %||% "bwr"
+
+      nameA <- rv$sample_name %||% "A"; nameB <- rv$sample_name_b %||% "B"
+      # the split view labels halves of the diagonal, the curtain labels sides,
+      # and the difference map has no sides at all - just name the formula
+      lab <- if (identical(mode, "curtain"))
+               list(a = sprintf(tr("cmp_label_left"),  nameA),
+                    b = sprintf(tr("cmp_label_right"), nameB))
+             else if (identical(mode, "diff"))
+               list(a = sprintf(tr("cmp_label_diff"),
+                                if (identical(dtype, "sub")) tr("cmp_diff_sub_short")
+                                else tr("cmp_diff_log2_short"), nameA, nameB),
+                    b = "")
+             else
+               list(a = sprintf(tr("cmp_label_a"), nameA),
+                    b = sprintf(tr("cmp_label_b"), nameB))
+      session$sendCustomMessage("setCmpLabels", list(
+        show = mode %in% c("split", "curtain", "diff"), mode = mode,
+        a = lab$a, b = lab$b, na = nameA, nb = nameB))
+    } else {
+      st$path2 <- NULL; st$norm2 <- NULL; st$bfac <- 1
+      st$cmpMode <- "single"; st$cmpDiag <- FALSE
+      session$sendCustomMessage("setCmpLabels", list(show = FALSE))
+    }
+    # Redraw BEFORE (re)building the curtain's B layer: the redraw bumps the
+    # tile cache-buster, so a freshly created B layer already fetches with it
+    # and no tile is requested twice.
+    if (redraw)
+      session$sendCustomMessage("redrawTiles", list(ver = as.numeric(Sys.time())))
+    session$sendCustomMessage("setCurtain", list(
+      on = identical(mode, "curtain"),
+      ratio = rv$cmp_ratio %||% 0.5))
+    invisible(NULL)
+  }
+
+  do_open_b <- function(src = current_src_b(), norm = input$norm_b) {
+    if (!isTRUE(rv$has_hic) || is.null(st$path) || is.null(rv$chr)) {
+      rv$cmp_msg <- tr("msg_cmp_need_a"); return(invisible(NULL))
+    }
+    if (is.null(src) || !nzchar(src)) {
+      rv$cmp_msg <- tr("msg_cmp_pick"); return(invisible(NULL))
+    }
+    tryCatch({
+      withProgress(message = tr("prog_cache_hic"), value = 0.3, {
+        path <- tryCatch(hic_local(src),
+                         error = function(e) { message("[cache B] download failed: ",
+                                                       conditionMessage(e)); src })
+      })
+      chroms <- strawr::readHicChroms(path)
+      if (!(rv$chr %in% chroms$name)) {
+        clear_cmp(msg = sprintf(tr("msg_cmp_no_chrom"), rv$chr)); return(invisible(NULL))
+      }
+      len_b <- as.numeric(chroms$length[chroms$name == rv$chr])[1]
+      if (!isTRUE(all.equal(as.numeric(len_b), as.numeric(rv$chrlen)))) {
+        clear_cmp(msg = sprintf(tr("msg_cmp_len"), rv$chr,
+                                format(rv$chrlen, big.mark = ","),
+                                format(len_b, big.mark = ",")))
+        return(invisible(NULL))
+      }
+      res_b  <- sort(strawr::readHicBpResolutions(path))
+      res_a  <- if (!is.null(rv$res_all_a)) rv$res_all_a else rv$res_all
+      common <- sort(intersect(res_a, res_b))
+      if (!length(common)) {
+        clear_cmp(msg = sprintf(tr("msg_cmp_no_res"),
+                                paste(res_a, collapse = "/"),
+                                paste(res_b, collapse = "/")))
+        return(invisible(NULL))
+      }
+      norms_b <- tryCatch(strawr::readHicNormTypes(path), error = function(e) NULL)
+      if (!is.null(norms_b) && length(norms_b) > 0) {
+        sel <- if (!is.null(norm) && norm %in% norms_b) norm else "NONE"
+        updateSelectInput(session, "norm_b", choices = norms_b, selected = sel)
+        norm <- sel
+      }
+      # Read B's overview at A's overview resolution when the file has it, so
+      # the two totals behind the depth factor are computed the same way.
+      ovres_b <- if (!is.null(rv$ov_res) && rv$ov_res %in% res_b) rv$ov_res
+                 else choose_res(rv$chrlen / 400, res_b)
+      withProgress(message = tr("prog_cmp_overview"), value = 0.5, {
+        ov_b <- read_hic_map(path, chr = rv$chr, start = 1, end = NA,
+                             resolution = ovres_b, normalization = norm)
+      })
+      tot_a <- total_counts(rv$ov); tot_b <- total_counts(ov_b)
+      bf <- if (is.finite(tot_a) && is.finite(tot_b) && tot_b > 0) tot_a / tot_b else 1
+
+      # ---- difference-map defaults, derived from the two overviews ----------
+      # eps (log2 pseudo-count): the median NON-ZERO contact count. Sparse bins
+      # where a 0-vs-1 count would give an infinite ratio then get pulled toward
+      # zero, while well-covered bins are barely touched.
+      # lim: the 99th percentile of |difference|, so the colour scale is set by
+      # the bulk of the data rather than by a handful of extreme pixels.
+      eps0 <- {
+        pv <- as.numeric(rv$ov); pv <- pv[is.finite(pv) & pv > 0]
+        if (length(pv)) stats::median(pv) else 1
+      }
+      q99 <- function(v) { v <- sort(v[is.finite(v)])
+                           if (!length(v)) NA_real_ else v[max(1, round(length(v) * 0.99))] }
+      lim_log2 <- 2; lim_sub <- 1
+      if (identical(ovres_b, rv$ov_res) && identical(dim(ov_b), dim(rv$ov))) {
+        a <- as.numeric(rv$ov); b <- as.numeric(ov_b) * bf
+        ok <- is.finite(a) & is.finite(b)
+        if (any(ok)) {
+          l1 <- q99(abs(log2((a[ok] + eps0) / (b[ok] + eps0))))
+          s1 <- q99(abs(a[ok] - b[ok]))
+          if (is.finite(l1) && l1 > 0) lim_log2 <- signif(l1, 3)
+          if (is.finite(s1) && s1 > 0) lim_sub  <- signif(s1, 3)
+        }
+      } else {
+        # different overview bin sizes: fall back to A's own value spread
+        s1 <- q99(abs(as.numeric(rv$ov)))
+        if (is.finite(s1) && s1 > 0) lim_sub <- signif(s1, 3)
+      }
+      rv$diff_eps_auto <- signif(eps0, 4)
+      rv$diff_lim_log2 <- lim_log2
+      rv$diff_lim_sub  <- lim_sub
+
+      rv$ov_b <- ov_b; rv$ov_b_res <- ovres_b
+      rv$path_b <- path; rv$norm_b <- norm; rv$src_b <- src
+      rv$bfac_auto <- bf; rv$bfac <- bf
+      rv$sample_name_b <- {
+        if (!is.null(input$hic_local_b) && nzchar(input$hic_local_b)) {
+          basename(input$hic_local_b)
+        } else {
+          lbl <- NULL
+          if (!is.null(rv$menu) && !is.null(input$dataset_sel_b)) {
+            row <- rv$menu[rv$menu$url == input$dataset_sel_b, ]
+            if (nrow(row) > 0)
+              lbl <- paste(row$sample_label[1], row$dataset_label[1], sep = " / ")
+          }
+          if (is.null(lbl)) basename(src) else lbl
+        }
+      }
+      # Narrow the resolution list to what BOTH files offer, so every tile reads
+      # A and B at exactly the same bin size. rv$res_all_a keeps A's own list for
+      # when the comparison is removed again.
+      if (is.null(rv$res_all_a)) rv$res_all_a <- rv$res_all
+      st$res <- common
+      rv$res_prog <- TRUE
+      rv$res_all  <- common
+      if (!is.null(st$fixedRes)) st$fixedRes <- common[which.min(abs(common - st$fixedRes))]
+
+      rv$has_b <- TRUE
+      apply_cmp()
+      rv$cmp_msg <- sprintf(tr("msg_cmp_ready"), rv$sample_name_b,
+                            paste(common, collapse = "/"), signif(bf, 4))
+      session$sendCustomMessage("closeLoader", list())
+    }, error = function(e)
+      rv$cmp_msg <- sprintf(tr("msg_open_err"), conditionMessage(e)))
+    invisible(NULL)
+  }
+
+  observeEvent(input$open_b, do_open_b())
+  observeEvent(input$clear_b, {
+    rv$src_b <- NULL
+    updateTextInput(session, "hic_local_b", value = "")
+    clear_cmp(msg = tr("msg_cmp_cleared"))
+    session$sendCustomMessage("redrawTiles", list(ver = as.numeric(Sys.time())))
+  })
+  output$status_b <- renderText(rv$cmp_msg)
+
+  # ---- comparison controls (Display > Map) ----
+  # Rebuilt whenever a sample is loaded or removed. The current choices are read
+  # with isolate() so a rebuild preserves them without creating a reactive loop.
+  output$cmp_controls <- renderUI({
+    if (!isTRUE(rv$has_b)) return(helpText(tr("cmp_none")))
+    mode0 <- isolate(input$cmp_mode)  %||% isolate(rv$cmp_mode_def)  %||% "split"
+    dep0  <- isolate(input$cmp_depth) %||% isolate(rv$cmp_depth_def) %||% TRUE
+    dia0  <- isolate(input$cmp_diag)  %||% isolate(rv$cmp_diag_def)  %||% TRUE
+    fac0  <- isolate(input$cmp_factor) %||% isolate(rv$cmp_factor_def)
+    if (is.null(fac0) || !is.finite(fac0) || fac0 <= 0) fac0 <- rv$bfac_auto
+    dty0  <- isolate(input$cmp_diff_type)  %||% isolate(rv$cmp_dtype_def) %||% "log2"
+    dcl0  <- isolate(input$cmp_diff_color) %||% isolate(rv$cmp_dcol_def)  %||% "bwr"
+    dlg0  <- isolate(input$cmp_diff_lim_log2) %||% isolate(rv$cmp_dlim_log2_def) %||% rv$diff_lim_log2
+    dsb0  <- isolate(input$cmp_diff_lim_sub)  %||% isolate(rv$cmp_dlim_sub_def)  %||% rv$diff_lim_sub
+    dep0e <- isolate(input$cmp_diff_eps)   %||% isolate(rv$cmp_deps_def)  %||% rv$diff_eps_auto
+    tagList(
+      radioButtons("cmp_mode", tr("cmp_mode"),
+                   choices = setNames(c("single", "split", "curtain", "diff"),
+                                      c(tr("cmp_mode_single"), tr("cmp_mode_split"),
+                                        tr("cmp_mode_curtain"), tr("cmp_mode_diff"))),
+                   selected = mode0),
+      # curtain: keyboard-driven blink comparison + a manual A/B button for
+      # people who would rather not learn the shortcut
+      conditionalPanel("input.cmp_mode == 'curtain'",
+        actionButton("cmp_blink", tr("cmp_blink_btn"), class = "btn-sm btn-block"),
+        helpText(tr("cmp_curtain_help"))),
+      # diagonal rule only means anything in the split view
+      conditionalPanel("input.cmp_mode == 'split'",
+        checkboxInput("cmp_diag", tr("cmp_diag"), value = dia0)),
+      # difference map: formula, diverging palette and its symmetric scale
+      conditionalPanel("input.cmp_mode == 'diff'",
+        radioButtons("cmp_diff_type", tr("cmp_diff_type"),
+                     choices = setNames(c("log2", "sub"),
+                                        c(tr("cmp_diff_log2"), tr("cmp_diff_sub"))),
+                     selected = dty0),
+        selectInput("cmp_diff_color", tr("cmp_diff_palette"),
+                    choices = setNames(c("bwr", "bwo", "pwg"),
+                                       c(tr("cmp_pal_bwr"), tr("cmp_pal_bwo"),
+                                         tr("cmp_pal_pwg"))),
+                    selected = dcl0),
+        # one box per formula: fold change and count difference are different
+        # units, so they must not share a value
+        conditionalPanel("input.cmp_diff_type == 'log2'",
+          numericInput("cmp_diff_lim_log2", tr("cmp_diff_lim_log2"),
+                       dlg0, min = 0, step = 0.1),
+          numericInput("cmp_diff_eps", tr("cmp_diff_eps"), dep0e, min = 0)),
+        conditionalPanel("input.cmp_diff_type == 'sub'",
+          numericInput("cmp_diff_lim_sub", tr("cmp_diff_lim_sub"),
+                       dsb0, min = 0)),
+        helpText(tr("cmp_diff_help"))),
+      hr(),
+      checkboxInput("cmp_depth", tr("cmp_depth"), value = dep0),
+      helpText(sprintf(tr("cmp_factor_auto"), signif(rv$bfac_auto, 4))),
+      conditionalPanel("input.cmp_depth == false",
+        numericInput("cmp_factor", tr("cmp_factor"), signif(fac0, 6),
+                     min = 0, step = 0.01)))
+  })
+
+  observeEvent(list(input$cmp_mode, input$cmp_depth, input$cmp_factor, input$cmp_diag,
+                    input$cmp_diff_type, input$cmp_diff_color, input$cmp_diff_eps,
+                    input$cmp_diff_lim_log2, input$cmp_diff_lim_sub), {
+    if (!isTRUE(rv$has_b)) return()
+    apply_cmp()
+  }, ignoreInit = TRUE)
+
+  # divider position reported back from the browser after a drag: kept only so
+  # it can be saved to / restored from a session file
+  observeEvent(input$cmp_ratio, {
+    r <- suppressWarnings(as.numeric(input$cmp_ratio))
+    if (is.finite(r)) rv$cmp_ratio <- min(1, max(0, r))
+  })
+  observeEvent(input$cmp_blink, {
+    session$sendCustomMessage("blinkToggle", list())
+  })
 
   # ---- session save / restore : the whole display state <-> a JSON file ----
   # Captures the data source, current region, display scale and every track so
   # the same view can be reproduced later.
   snapshot_session <- function() {
-    v <- input$map_view
+    v <- if (isTRUE(rv$has_hic)) input$map_view else NULL
+    vw <- view_range()
     region <- if (!is.null(v))
                 list(start = round(max(1, v$west)), end = round(v$east),
                      ystart = round(max(1, v$north)), yend = round(v$south))
+              else if (!is.null(vw))
+                list(start = round(max(1, vw$west)), end = round(vw$east))
               else list(start = input$start, end = input$end)
     tracks <- lapply(unname(rv$tracks), function(t) list(
       path = t$path, type = t$type, name = t$name, color = t$color,
@@ -773,8 +1515,23 @@ server <- function(input, output, session) {
       agg = if (is.null(t$agg)) "mean" else t$agg))
     bookmarks <- lapply(unname(rv$bookmarks), function(b) list(
       name = b$name, chr = b$chr, x0 = b$x0, x1 = b$x1, y0 = b$y0, y1 = b$y1))
+    # the comparison sample and how it is combined with A
+    cmp <- if (isTRUE(rv$has_b))
+             list(src = rv$src_b, normalization = rv$norm_b,
+                  mode = input$cmp_mode %||% "split",
+                  depth_auto = isTRUE(input$cmp_depth %||% TRUE),
+                  factor = input$cmp_factor %||% rv$bfac_auto,
+                  diagonal = isTRUE(input$cmp_diag %||% TRUE),
+                  ratio = rv$cmp_ratio %||% 0.5,
+                  diff_type  = input$cmp_diff_type  %||% "log2",
+                  diff_color = input$cmp_diff_color %||% "bwr",
+                  diff_lim_log2 = input$cmp_diff_lim_log2 %||% rv$diff_lim_log2,
+                  diff_lim_sub  = input$cmp_diff_lim_sub  %||% rv$diff_lim_sub,
+                  diff_eps      = input$cmp_diff_eps      %||% rv$diff_eps_auto)
+           else NULL
     list(app = "HiCarta", format = 1L,
          hic = list(src = current_src(), chr = rv$chr, normalization = input$normalization),
+         compare = cmp,
          region = region,
          display = list(color = input$color, vmax = input$vmax_num,
                         map_height = input$map_height, trk_bins = rv$trk_bins),
@@ -832,6 +1589,11 @@ server <- function(input, output, session) {
     }
     if (!is.null(d$map_height)) updateNumericInput(session, "map_height", value = d$map_height)
 
+    # A comparison sample is restored explicitly below (if the file has one), so
+    # clear any current one first — do_open() would otherwise re-attach it.
+    rv$src_b <- NULL
+    cmp <- sess$compare
+
     # open with explicit values so we don't depend on async input updates
     do_open(src = hic$src, chr = hic$chr %||% input$chr,
             start = reg$start %||% 1, end = reg$end %||% 1e12,
@@ -839,6 +1601,23 @@ server <- function(input, output, session) {
             yend = reg$yend %||% reg$end %||% 1e12,
             norm = hic$normalization %||% "NONE",
             color = d$color %||% input$color, vmax = d$vmax)
+    # restore the comparison sample and its settings (the defaults below are read
+    # by apply_cmp()/cmp_controls before the Display widgets exist)
+    if (!is.null(cmp) && !is.null(cmp$src) && nzchar(cmp$src)) {
+      rv$cmp_mode_def   <- cmp$mode %||% "split"
+      rv$cmp_depth_def  <- isTRUE(cmp$depth_auto %||% TRUE)
+      rv$cmp_diag_def   <- isTRUE(cmp$diagonal %||% TRUE)
+      rv$cmp_factor_def <- cmp$factor
+      rr <- suppressWarnings(as.numeric(cmp$ratio %||% 0.5))
+      rv$cmp_ratio <- if (is.finite(rr)) min(1, max(0, rr)) else 0.5
+      rv$cmp_dtype_def     <- cmp$diff_type  %||% "log2"
+      rv$cmp_dcol_def      <- cmp$diff_color %||% "bwr"
+      rv$cmp_dlim_log2_def <- cmp$diff_lim_log2
+      rv$cmp_dlim_sub_def  <- cmp$diff_lim_sub
+      rv$cmp_deps_def      <- cmp$diff_eps
+      updateTextInput(session, "hic_local_b", value = cmp$src)
+      do_open_b(src = cmp$src, norm = cmp$normalization %||% "NONE")
+    }
     if (!is.null(d$map_height))
       session$sendCustomMessage("setMapHeight", list(h = d$map_height))
     rv$trk_msg <- tr("msg_session_loaded")
@@ -985,6 +1764,19 @@ server <- function(input, output, session) {
   # coordinate system for that chromosome); otherwise just pan/zoom the current
   # map to Start–End without reloading.
   observeEvent(input$goto, {
+    # track-only mode: no map to pan, just move the shared x-range
+    if (!isTRUE(rv$has_hic) && !is.null(rv$chrinfo)) {
+      cc <- input$chr
+      if (is.null(cc) || !(cc %in% names(rv$chrinfo))) cc <- rv$chr
+      len <- chrinfo_len(cc)
+      if (is.null(len)) return()
+      s <- suppressWarnings(as.numeric(input$start))
+      e <- suppressWarnings(as.numeric(input$end))
+      if (!is.finite(s) || s < 1) s <- 1
+      if (!is.finite(e) || e <= s) e <- len
+      set_track_view(cc, s, e)
+      return()
+    }
     src <- current_src()
     if (is.null(src)) { rv$msg <- tr("msg_pick_src"); return() }
     if (is.null(rv$open_key) || !identical(rv$open_key, paste(src, input$chr))) {
@@ -1001,8 +1793,47 @@ server <- function(input, output, session) {
     if (is.null(rv$chr)) return()
     step <- suppressWarnings(as.numeric(input$pan_step))
     if (is.na(step) || step <= 0) step <- 0.5
+    # track-only mode: tracks are 1-D, so only the horizontal move applies
+    if (!isTRUE(rv$has_hic)) {
+      if (is.null(rv$tv_x0) || dx == 0) return()
+      len <- if (is.null(rv$chrlen)) rv$tv_x1 else rv$chrlen
+      w  <- rv$tv_x1 - rv$tv_x0
+      x0 <- rv$tv_x0 + dx * step * w; x1 <- x0 + w
+      if (x0 < 1)   { x1 <- x1 + (1 - x0); x0 <- 1 }
+      if (x1 > len) { x0 <- max(1, x0 - (x1 - len)); x1 <- len }
+      set_track_view(rv$chr, x0, x1)
+      return()
+    }
     session$sendCustomMessage("panView", list(fx = dx * step, fy = dy * step))
   }
+
+  # zoom the visible range: f < 1 zooms in, f > 1 zooms out
+  zoom_view <- function(f) {
+    if (!isTRUE(rv$has_hic)) {
+      if (is.null(rv$tv_x0) || is.null(rv$chr)) return()
+      len <- if (is.null(rv$chrlen)) rv$tv_x1 else rv$chrlen
+      mid <- (rv$tv_x0 + rv$tv_x1) / 2
+      w   <- min(len, max(100, (rv$tv_x1 - rv$tv_x0) * f))
+      x0  <- mid - w / 2; x1 <- mid + w / 2
+      if (x0 < 1)   { x1 <- x1 + (1 - x0); x0 <- 1 }
+      if (x1 > len) { x0 <- max(1, x0 - (x1 - len)); x1 <- len }
+      set_track_view(rv$chr, x0, x1)
+      return()
+    }
+    if (is.null(rv$chr)) return()
+    session$sendCustomMessage("zoomBy", list(d = if (f < 1) 1 else -1))
+  }
+  observeEvent(input$zoom_in,  zoom_view(0.5))
+  observeEvent(input$zoom_out, zoom_view(2))
+
+  # track-only mode: picking another chromosome jumps to the whole of it
+  observeEvent(input$chr, {
+    if (isTRUE(rv$has_hic) || is.null(rv$chrinfo)) return()
+    cc <- input$chr
+    if (is.null(cc) || !(cc %in% names(rv$chrinfo)) || identical(cc, rv$chr)) return()
+    len <- chrinfo_len(cc); if (is.null(len)) return()
+    set_track_view(cc, 1, len)
+  }, ignoreInit = TRUE)
   observeEvent(input$pan_left,  pan(-1, 0))
   observeEvent(input$pan_right, pan( 1, 0))
   observeEvent(input$pan_up,    pan(0, -1))
@@ -1013,15 +1844,20 @@ server <- function(input, output, session) {
   observeEvent(input$pan_dr,    pan( 1,  1))
   observeEvent(input$view_whole, {
     if (is.null(rv$chrlen)) return()
+    if (!isTRUE(rv$has_hic)) { set_track_view(rv$chr, 1, rv$chrlen); return() }
     session$sendCustomMessage("viewWhole", list(chrlen = rv$chrlen))
   })
 
   # ---- bookmarks : star the current view, jump back to it later ----
   observeEvent(input$bm_add, {
-    if (is.null(rv$chr)) { rv$msg <- tr("msg_need_hic_first"); return() }
-    v <- input$map_view; if (is.null(v)) return()
-    x0 <- round(max(1, v$west)); x1 <- round(v$east)
-    y0 <- round(max(1, v$north)); y1 <- round(v$south)
+    if (is.null(rv$chr)) { rv$msg <- tr("msg_need_data_first"); return() }
+    vw <- view_range(); if (is.null(vw)) return()
+    x0 <- round(max(1, vw$west)); x1 <- round(vw$east)
+    # without a contact map there is no Y range - reuse X so the bookmark is
+    # still meaningful if a map is opened later.
+    v  <- input$map_view
+    y0 <- if (isTRUE(rv$has_hic) && !is.null(v)) round(max(1, v$north)) else x0
+    y1 <- if (isTRUE(rv$has_hic) && !is.null(v)) round(v$south)        else x1
     rv$bm_seq <- rv$bm_seq + 1L; id <- rv$bm_seq
     nm <- if (!is.null(input$bm_name) && nzchar(input$bm_name)) input$bm_name
           else sprintf("%s:%s-%s", rv$chr, format(x0, big.mark = ","), format(x1, big.mark = ","))
@@ -1034,6 +1870,13 @@ server <- function(input, output, session) {
   observeEvent(input$bm_goto, {
     b <- rv$bookmarks[[as.character(input$bm_goto)]]
     if (is.null(b)) return()
+    if (!isTRUE(rv$has_hic)) {          # track-only: just move the x-range
+      if (!is.null(rv$chrinfo) && b$chr %in% names(rv$chrinfo)) {
+        updateSelectInput(session, "chr", selected = b$chr)
+        set_track_view(b$chr, b$x0, b$x1)
+      }
+      return()
+    }
     if (!is.null(rv$chr) && identical(b$chr, rv$chr))
       session$sendCustomMessage("gotoView", list(x0 = b$x0, x1 = b$x1, y0 = b$y0, y1 = b$y1))
     else
@@ -1138,8 +1981,13 @@ server <- function(input, output, session) {
 
   # view coordinate readout
   output$coord <- renderText({
-    v <- input$map_view; if (is.null(v) || is.null(rv$chr)) return("")
     f <- function(z) format(round(max(1, z)), big.mark = ",", scientific = FALSE)
+    # track-only mode: a single 1-D range, no resolution / no Y axis
+    if (!isTRUE(rv$has_hic)) {
+      vw <- view_range(); if (is.null(vw) || is.null(rv$chr)) return("")
+      return(sprintf(tr("coord_view_1d"), rv$chr, f(vw$west), f(vw$east)))
+    }
+    v <- input$map_view; if (is.null(v) || is.null(rv$chr)) return("")
     resLab <- ""
     # fixed mode -> show the pinned resolution; auto mode -> the zoom-driven one
     if (isFALSE(input$map_res_auto) && !is.null(rv$res_all) &&
@@ -1153,6 +2001,11 @@ server <- function(input, output, session) {
     }
     nameLab <- if (!is.null(rv$sample_name) && nzchar(rv$sample_name))
                  paste0(sprintf(tr("coord_sample"), rv$sample_name), "   ") else ""
+    # in a two-sample view name the comparison sample too, next to sample A
+    if (isTRUE(rv$has_b) && (input$cmp_mode %||% "split") %in% c("split", "curtain") &&
+        !is.null(rv$sample_name_b))
+      nameLab <- paste0(trimws(nameLab, "right"),
+                        sprintf(tr("coord_cmp"), rv$sample_name_b), "   ")
     paste0(nameLab,
            sprintf(tr("coord_view"), rv$chr, f(v$west), f(v$east),
                    rv$chr, f(v$north), f(v$south), resLab))
@@ -1167,43 +2020,100 @@ server <- function(input, output, session) {
     ix <- min(nc, floor((h$x - 1) / r) + 1); iy <- min(nr, floor((h$y - 1) / r) + 1)
     score <- rv$ov[iy, ix]
     f <- function(z) format(round(z), big.mark = ",", scientific = FALSE)
-    sc <- if (is.na(score)) "NA" else formatC(score, format = "g", digits = 4)
-    sprintf(tr("hover_line"),
-            rv$chr, f(h$x), rv$chr, f(h$y), sc, f(abs(h$x - h$y)))
+    g <- function(z) if (is.null(z) || length(z) != 1 || is.na(z)) "NA"
+                     else formatC(z, format = "g", digits = 4)
+    sc <- g(score)
+    line <- sprintf(tr("hover_line"),
+                    rv$chr, f(h$x), rv$chr, f(h$y), sc, f(abs(h$x - h$y)))
+    # With a comparison sample loaded, always report BOTH samples for this locus
+    # pair plus their log2 ratio — the split view alone only shows one of them
+    # at any given pixel. B is depth-corrected so the two numbers are comparable.
+    if (isTRUE(rv$has_b) && !is.null(rv$ov_b)) {
+      rb <- rv$ov_b_res; nrb <- nrow(rv$ov_b); ncb <- ncol(rv$ov_b)
+      ixb <- min(ncb, floor((h$x - 1) / rb) + 1)
+      iyb <- min(nrb, floor((h$y - 1) / rb) + 1)
+      bf <- rv$bfac; if (is.null(bf) || !is.finite(bf) || bf <= 0) bf <- 1
+      # counts scale with bin area, so put B's overview on A's bin size too
+      # (they are usually identical; this covers files with different res sets)
+      areaf <- if (is.finite(rb) && rb > 0) (r / rb)^2 else 1
+      vb <- rv$ov_b[iyb, ixb] * bf * areaf
+      va <- score
+      # same pseudo-count the difference map uses, so the number under the
+      # cursor matches the colour on screen
+      eps <- rv$diff_eps_auto
+      if (is.null(eps) || !is.finite(eps) || eps <= 0) eps <- 1
+      lr <- if (is.na(va) || is.na(vb)) NA_real_ else log2((va + eps) / (vb + eps))
+      sb <- if (is.na(va) || is.na(vb)) NA_real_ else va - vb
+      line <- paste0(line, sprintf(tr("hover_cmp"), g(va), g(vb),
+                                   if (is.na(lr)) "NA" else formatC(lr, format = "f", digits = 2),
+                                   g(sb)))
+    }
+    line
   })
 
   # ---------------- 1-D tracks (bigWig / BED), synced to the map x-range ------
   output$trk_status <- renderText(rv$trk_msg)
 
   observeEvent(input$trk_add, {
-    # tracks are drawn on the Hi-C map's coordinate system, so a map must be
-    # loaded first — otherwise the sync/auto-fit runs against an unset view.
-    if (is.null(rv$chr)) { rv$trk_msg <- tr("msg_need_hic_first"); return() }
     if (is.null(input$trk_path) || !nzchar(input$trk_path)) {
       rv$trk_msg <- tr("msg_enter_track"); return() }
     withProgress(message = tr("prog_cache_trk"), value = 0.4, {
       lp <- tryCatch(cache_local(input$trk_path),
                      error = function(e) { message("[track] cache failed: ", conditionMessage(e)); input$trk_path })
     })
+    ty <- input$trk_type
+    # parse gene / Border Strength files up front (fills the caches that both
+    # drawing and the chromosome-info lookup below use)
+    if (identical(ty, "gene"))
+      withProgress(message = tr("prog_parse_gff3"), value = 0.5,
+                   { tryCatch(read_genes(lp), error = function(e) rv$trk_msg <- sprintf(tr("msg_gff3_err"), conditionMessage(e))) })
+    if (identical(ty, "BorderStrength"))
+      withProgress(message = tr("prog_read_bs"), value = 0.5,
+                   { tryCatch(read_bs(lp), error = function(e) rv$trk_msg <- sprintf(tr("msg_bs_err"), conditionMessage(e))) })
+
+    # ---- no Hi-C map open: take the coordinate system from this track -------
+    # The first track added defines the chromosomes; we start on the whole of
+    # the first one, exactly as a freshly-opened contact map would.
+    chrom_msg <- ""
+    if (!isTRUE(rv$has_hic) && is.null(rv$chrinfo)) {
+      ci <- withProgress(message = tr("prog_chrom_info"), value = 0.6, {
+              tryCatch(track_chrom_info(lp, ty), error = function(e) NULL) })
+      if (is.null(ci) || length(ci) == 0) {
+        rv$trk_msg <- tr("msg_no_chrom"); return()
+      }
+      rv$chrinfo <- ci
+      updateSelectInput(session, "chr", choices = names(ci), selected = names(ci)[1])
+      set_track_view(names(ci)[1], 1, as.numeric(ci[[1]]))
+      chrom_msg <- sprintf(tr("msg_chrom_from_track"), length(ci),
+                           names(ci)[1], format(round(as.numeric(ci[[1]])), big.mark = ","))
+    }
+    if (is.null(rv$chr)) { rv$trk_msg <- tr("msg_no_chrom"); return() }
+
     rv$trk_seq <- rv$trk_seq + 1L
     id <- rv$trk_seq
     nm <- if (nzchar(input$trk_name)) input$trk_name else tools::file_path_sans_ext(basename(input$trk_path))
     col <- if (is.null(input$trk_color) || !nzchar(input$trk_color)) "darkblue" else input$trk_color
     rv$tracks[[as.character(id)]] <- list(id = id, name = nm, path = lp,
-      type = input$trk_type, color = col, height = input$trk_height, ymax = 0,
+      type = ty, color = col, height = input$trk_height, ymax = 0,
       agg = "mean")
-    if (identical(input$trk_type, "gene"))
-      withProgress(message = tr("prog_parse_gff3"), value = 0.5,
-                   { tryCatch(read_genes(lp), error = function(e) rv$trk_msg <- sprintf(tr("msg_gff3_err"), conditionMessage(e))) })
-    if (identical(input$trk_type, "BorderStrength"))
-      withProgress(message = tr("prog_read_bs"), value = 0.5,
-                   { tryCatch(read_bs(lp), error = function(e) rv$trk_msg <- sprintf(tr("msg_bs_err"), conditionMessage(e))) })
-    rv$trk_msg <- sprintf(tr("msg_added_track"), nm, input$trk_type)
-    # Auto Fit to window: resize the contact map so it + all tracks fit the window
-    tot <- sum(vapply(rv$tracks, function(t) as.numeric(t$height) + 6, numeric(1)))
-    session$sendCustomMessage("fitMap", list(tracksTotal = tot))
+    rv$trk_msg <- paste0(sprintf(tr("msg_added_track"), nm, ty),
+                         if (nzchar(chrom_msg)) paste0("\n", chrom_msg) else "")
+    # Auto Fit to window: resize the contact map so it + all tracks fit the
+    # window. Only meaningful while a contact map is on screen.
+    if (isTRUE(rv$has_hic)) {
+      tot <- sum(vapply(rv$tracks, function(t) as.numeric(t$height) + 6, numeric(1)))
+      session$sendCustomMessage("fitMap", list(tracksTotal = tot))
+    }
   })
-  observeEvent(input$trk_clear, { rv$tracks <- list(); rv$trk_msg <- tr("msg_cleared_trk") })
+  observeEvent(input$trk_clear, {
+    rv$tracks <- list(); rv$trk_msg <- tr("msg_cleared_trk")
+    # in track-only mode the coordinates came from a track, so drop them too:
+    # the next track added defines the coordinate system afresh.
+    if (!isTRUE(rv$has_hic)) {
+      rv$chrinfo <- NULL; rv$chr <- NULL; rv$chrlen <- NULL
+      rv$tv_x0 <- NULL; rv$tv_x1 <- NULL
+    }
+  })
 
   # parse one IGV XML URL -> populate the Category dropdown
   load_one_xml <- function(url) {
@@ -1276,7 +2186,9 @@ server <- function(input, output, session) {
     for (t in rv$tracks) local({
       tt <- t
       output[[paste0("trk_plot_", tt$id)]] <- renderPlot({
-        v <- input$map_view; req(v, rv$chr)
+        # x-range comes from the contact map when there is one, otherwise from
+        # the track-only view driven by the Navigate panel
+        v <- view_range(); req(v, rv$chr)
         if (identical(tt$type, "gene"))
           plot_gene_track(read_genes(tt$path), rv$chr, v$west, v$east,
                           chrlen = rv$chrlen, name = tt$name, color = tt$color)
@@ -1294,22 +2206,27 @@ server <- function(input, output, session) {
   # ---------------- image / print export (Print pill -> modal) ----------------
   # Open the print-preview modal, pre-filled from the current view.
   observeEvent(input$exp_open, {
-    if (is.null(st$path)) {
-      showNotification(tr("print_need_map"), type = "warning")
+    # a contact map OR at least one track is enough to print something
+    if (is.null(st$path) && length(rv$tracks) == 0) {
+      showNotification(tr("print_need_data"), type = "warning")
       return()
     }
-    v <- input$map_view
+    v <- view_range()
     cur_chr   <- if (!is.null(rv$chr)) rv$chr else input$chr
     cur_start <- if (!is.null(v)) max(1, round(v$west)) else max(1, input$start)
     cur_end   <- if (!is.null(v)) round(v$east)
                  else if (!is.null(rv$chrlen)) min(rv$chrlen, input$end) else input$end
     if (!is.finite(cur_end) || cur_end <= cur_start)
       cur_end <- if (!is.null(rv$chrlen)) rv$chrlen else cur_start + 1e6
-    chr_choices <- tryCatch({
-      info <- strawr::readHicChroms(st$path)
-      cc <- info$name[!tolower(info$name) %in% c("all", "assembly")]
-      if (length(cc)) cc else c("I", "II", "III")
-    }, error = function(e) c("I", "II", "III"))
+    chr_choices <- if (!is.null(st$path)) {
+      tryCatch({
+        info <- strawr::readHicChroms(st$path)
+        cc <- info$name[!tolower(info$name) %in% c("all", "assembly")]
+        if (length(cc)) cc else c("I", "II", "III")
+      }, error = function(e) c("I", "II", "III"))
+    } else if (!is.null(rv$chrinfo)) {
+      names(rv$chrinfo)
+    } else c("I", "II", "III")
     if (!cur_chr %in% chr_choices) chr_choices <- unique(c(cur_chr, chr_choices))
     def_name <- sprintf("HiCarta_%s_%d-%d", cur_chr, round(cur_start), round(cur_end))
 
@@ -1392,10 +2309,15 @@ server <- function(input, output, session) {
   # region matrix for export: re-read only when chr/start/end change (key-guarded)
   export_mat <- reactive({
     req(input$exp_chr, input$exp_start, input$exp_end)
-    if (is.null(st$path)) return(NULL)
+    if (is.null(st$path)) return(NULL)     # track-only export: no matrix
     s <- max(1, as.numeric(input$exp_start)); e <- as.numeric(input$exp_end)
     if (!is.finite(s) || !is.finite(e) || e <= s) return(NULL)
-    key <- paste(st$path, input$exp_chr, s, e, st$norm)
+    # the comparison sample and its depth factor change the matrix too, so they
+    # belong in the cache key
+    key <- paste(st$path, input$exp_chr, s, e, st$norm,
+                 st$path2 %||% "", st$norm2 %||% "",
+                 st$cmpMode %||% "single", st$bfac %||% 1,
+                 st$diffType %||% "", st$diffEps %||% "")
     if (!identical(rv$exp_key, key)) {
       rv$exp_data <- tryCatch(
         read_export_matrix(st, input$exp_chr, s, e),
@@ -1407,8 +2329,16 @@ server <- function(input, output, session) {
 
   # scaled colour bounds so the export matches the on-screen tiles (which scale
   # the global vmin/vmax by (res/ovres)^2 for the tile's resolution).
-  exp_bounds <- function(res) {
-    f    <- (res / (st$ovres %||% res))^2
+  exp_bounds <- function(res, diff = FALSE) {
+    f <- (res / (st$ovres %||% res))^2
+    if (isTRUE(diff)) {
+      # symmetric limits; the count difference scales with bin area, the
+      # dimensionless log2 ratio does not (mirrors render_tile)
+      lim <- st$diffLim
+      if (is.null(lim) || length(lim) != 1 || !is.finite(lim) || lim <= 0) lim <- 1
+      if (identical(st$diffType, "sub")) lim <- lim * f
+      return(list(vmin = -lim, vmax = lim))
+    }
     vmax <- ((if (!is.null(st$vmax)) st$vmax else 1)) * f
     vmin <- ((if (!is.null(st$vmin)) st$vmin else 0)) * f
     list(vmin = vmin, vmax = vmax)
@@ -1438,6 +2368,30 @@ server <- function(input, output, session) {
     })
   }
 
+  # Extra drawing arguments for a two-sample split export: the diagonal rule and
+  # the corner captions naming each half. Empty list when not in split view, so
+  # do.call() below is a no-op for the ordinary single-sample export.
+  export_split_args <- function(d) {
+    if (is.null(d)) return(list())
+    if (isTRUE(d$diff))
+      return(list(diff = TRUE,
+                  label_a = sprintf(tr("cmp_label_diff"),
+                                    if (identical(st$diffType, "sub")) tr("cmp_diff_sub_short")
+                                    else tr("cmp_diff_log2_short"),
+                                    rv$sample_name %||% "A", rv$sample_name_b %||% "B")))
+    if (!isTRUE(d$split)) return(list())
+    list(diagonal = isTRUE(st$cmpDiag),
+         label_a = sprintf(tr("cmp_label_a"), rv$sample_name %||% "A"),
+         label_b = sprintf(tr("cmp_label_b"), rv$sample_name_b %||% "B"))
+  }
+
+  # the palette argument depends on the mode: a difference map uses the
+  # diverging palette chosen in the Compare tab, everything else the Hi-C one
+  exp_palette <- function(d) {
+    if (!is.null(d) && isTRUE(d$diff)) st$diffColor %||% "bwr"
+    else st$color %||% input$color
+  }
+
   output$exp_preview_ui <- renderUI({
     w <- input$exp_w %||% 210; h <- input$exp_h %||% 297
     ph <- max(220, min(560, round(500 * as.numeric(h) / as.numeric(w))))
@@ -1445,32 +2399,41 @@ server <- function(input, output, session) {
   })
 
   output$exp_preview <- renderPlot({
-    d <- export_mat(); req(d)
-    b <- exp_bounds(d$res)
+    d <- export_mat()
+    if (is.null(d)) req(is.null(st$path))      # no map: tracks-only preview
+    b <- if (is.null(d)) list(vmin = 0, vmax = 1) else exp_bounds(d$res, d$diff)
     s <- max(1, as.numeric(input$exp_start)); e <- as.numeric(input$exp_end)
-    draw_export_map(d$m, input$exp_chr, input$exp_start, input$exp_end,
-                    color = st$color %||% input$color, vmin = b$vmin, vmax = b$vmax,
-                    ticks = isTRUE(input$exp_ticks), legend = isTRUE(input$exp_legend),
-                    no_margin = isTRUE(input$exp_nomargin),
-                    tracks = build_export_tracks(s, e),
-                    map_weight = input$map_height %||% 720)
+    do.call(draw_export_map, c(list(
+      if (is.null(d)) NULL else d$m,
+      input$exp_chr, input$exp_start, input$exp_end,
+      color = exp_palette(d), vmin = b$vmin, vmax = b$vmax,
+      ticks = isTRUE(input$exp_ticks), legend = isTRUE(input$exp_legend),
+      no_margin = isTRUE(input$exp_nomargin),
+      tracks = build_export_tracks(s, e),
+      map_weight = input$map_height %||% 720), export_split_args(d)))
   })
 
   output$exp_status <- renderText(rv$exp_msg)
 
   observeEvent(input$exp_run, {
     d <- export_mat()
-    if (is.null(d)) { rv$exp_msg <- tr("print_check_region"); return() }
-    b <- exp_bounds(d$res)
+    # d == NULL is normal when no .hic is loaded (tracks-only export)
+    if (is.null(d) && !is.null(st$path)) { rv$exp_msg <- tr("print_check_region"); return() }
+    b <- if (is.null(d)) list(vmin = 0, vmax = 1) else exp_bounds(d$res, d$diff)
     s <- max(1, as.numeric(input$exp_start)); e <- as.numeric(input$exp_end)
     exp_tracks <- build_export_tracks(s, e)
+    if (is.null(d) && length(exp_tracks) == 0) { rv$exp_msg <- tr("print_need_data"); return() }
     mapw <- input$map_height %||% 720
+    split_args <- export_split_args(d)
+    pal <- exp_palette(d)
     draw_fn <- function()
-      draw_export_map(d$m, input$exp_chr, input$exp_start, input$exp_end,
-                      color = st$color %||% input$color, vmin = b$vmin, vmax = b$vmax,
-                      ticks = isTRUE(input$exp_ticks), legend = isTRUE(input$exp_legend),
-                      no_margin = isTRUE(input$exp_nomargin),
-                      tracks = exp_tracks, map_weight = mapw)
+      do.call(draw_export_map, c(list(
+        if (is.null(d)) NULL else d$m,
+        input$exp_chr, input$exp_start, input$exp_end,
+        color = pal, vmin = b$vmin, vmax = b$vmax,
+        ticks = isTRUE(input$exp_ticks), legend = isTRUE(input$exp_legend),
+        no_margin = isTRUE(input$exp_nomargin),
+        tracks = exp_tracks, map_weight = mapw), split_args))
     W <- input$exp_w %||% 210; H <- input$exp_h %||% 297
 
     if (identical(input$exp_dest, "printer")) {

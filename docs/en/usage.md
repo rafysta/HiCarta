@@ -20,19 +20,35 @@ Data is loaded from the loader that opens when you click the **Data** button at 
 
 ### Load a bigWig {#load-bigwig}
 
-1. Open a Hi-C map first (tracks are drawn on the map's coordinates).
-2. Open the **Data** button → **Tracks** tab.
-3. Enter the bigWig path or URL in **bigWig/BED file/URL** (**Browse…** also works).
-4. Set **Type** to "bigWig" and click **Add track**.
+1. Open the **Data** button → **Tracks** tab.
+2. Enter the bigWig path or URL in **bigWig/BED file/URL** (**Browse…** also works).
+3. Set **Type** to "bigWig" and click **Add track**.
+
+If a Hi-C map is already open, the track is drawn on the map's coordinates.
 
 → Details: [Screens & controls - Tracks](interface.md#tracks)
 
+### Tracks without a contact map {#tracks-only}
+
+You can add tracks with no Hi-C map loaded. HiCarta then **reads the chromosome
+names and lengths from the first track file you add** and shows the whole of its
+first chromosome; the contact map stays hidden.
+
+- Lengths come from the bigWig header, or from the largest coordinate found in a
+  BED / GFF3 / `*_BS.txt` file.
+- Navigate from the **Navigate** panel: pick a chromosome to jump to all of it,
+  type Start/End and press **Go to region**, pan with the left/right buttons, and
+  zoom with **+ / −**.
+- If the file carries no usable chromosome information, a message says so — open
+  a Hi-C map first in that case.
+- Open a Hi-C map later and the contact map appears, synced to the tracks as usual.
+- **Print** works for tracks alone (a coordinate axis plus the tracks).
+
 ### Load Border Strength {#load-bs}
 
-1. Open a Hi-C map first.
-2. Open the **Data** button → **Tracks** tab.
-3. Enter the path or URL of the Border Strength file (`*_BS.txt`) in the file field.
-4. Set **Type** to "Border Strength" and click **Add track**.
+1. Open the **Data** button → **Tracks** tab.
+2. Enter the path or URL of the Border Strength file (`*_BS.txt`) in the file field.
+3. Set **Type** to "Border Strength" and click **Add track**.
 
 Positive values are drawn in red, negative values in blue, and boundaries are marked with dashed lines. For the file format, see **[Data formats](data-formats.md)**.
 

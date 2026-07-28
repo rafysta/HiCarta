@@ -61,6 +61,7 @@ R/
   tracks.R            bigWig / BED tracks (rtracklayer)
   genes.R             gene track (GFF3)
   borderstrength.R    Border Strength track (*_BS.txt)
+  chrominfo.R         chromosome names/lengths from a track file (no-map mode)
   install_libraries.R installs required packages
 scripts/              utility scripts (e.g. hic200 -> .hic conversion)
 docs/                 documentation source (served via GitHub Pages / MkDocs)

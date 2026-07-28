@@ -25,6 +25,39 @@ hic_palette <- function(name = "matlab") {
   }
 }
 
+# --- diverging palettes for the two-sample difference map -------------------
+# A difference map needs a scale with a meaningful MIDPOINT: zero (no change)
+# must be visually neutral and the two directions must be equally strong, or the
+# eye reads an asymmetry that is not in the data. These run light in the middle
+# and saturate at both ends.
+#   bwr : blue - white - red      (the Hi-C convention: red = higher in A)
+#   pwg : purple - white - green  (safer for red-green colour blindness)
+#   bwo : blue - white - orange   (also colour-blind friendly, warmer)
+diff_palette <- function(name = "bwr") {
+  switch(name,
+    pwg = c("#40004B", "#762A83", "#9970AB", "#C2A5CF", "#E7D4E8", "#F7F7F7",
+            "#D9F0D3", "#A6DBA0", "#5AAE61", "#1B7837", "#00441B"),
+    bwo = c("#053061", "#2166AC", "#4393C3", "#92C5DE", "#D1E5F0", "#F7F7F7",
+            "#FEE0B6", "#FDB863", "#E08214", "#B35806", "#7F3B08"),
+    c("#053061", "#2166AC", "#4393C3", "#92C5DE", "#D1E5F0", "#F7F7F7",
+      "#FDDBC7", "#F4A582", "#D6604D", "#B2182B", "#67001F"))
+}
+
+# Map signed values to a diverging palette on the SYMMETRIC range [-lim, +lim].
+# Symmetry is the point: it guarantees that zero lands exactly on the palette's
+# neutral midpoint, so "no difference" always looks the same whatever the data.
+# NA becomes fully transparent, as in values_to_colors().
+values_to_diff_colors <- function(vals, color = "bwr", lim = 1) {
+  if (!is.finite(lim) || lim <= 0) lim <- 1
+  pal <- colorRampPalette(diff_palette(color))(256)
+  v <- pmin(pmax(vals, -lim), lim)
+  idx <- floor((v + lim) / (2 * lim) * 255) + 1
+  idx[is.na(idx) | idx < 1] <- 1L; idx[idx > 256] <- 256L
+  out <- pal[idx]
+  out[is.na(vals)] <- "#00000000"
+  out
+}
+
 .take_middle <- function(mat, lo, hi) {
   mat <- ifelse(mat < lo, lo, mat)
   ifelse(mat > hi, hi, mat)

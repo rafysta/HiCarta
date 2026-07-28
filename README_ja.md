@@ -23,6 +23,7 @@ R/juicer_menu.R        juicer メニュー（ID = 親, ラベル[, URL]）のパ
 R/tracks.R             bigWig / BED トラック（rtracklayer）
 R/genes.R              遺伝子トラック（GFF3）
 R/borderstrength.R     Border Strength トラック（*_BS.txt）
+R/chrominfo.R          トラックファイルから染色体名・長さを取得（マップなし表示用）
 R/install_libraries.R  必要パッケージのインストール
 config.txt             起動時の既定値
 run_windows.bat / run_mac.command  ランチャー
@@ -61,6 +62,8 @@ language        = ja                                     # 画面の言語（en=
 ## トラック
 
 Tracks パネルで各種 1D トラックを contact map の下に追加できます（マップの横方向のパン/ズームに連動、複数可、色・高さ調整可、カーソルの縦線がトラックまで貫通）。
+
+Hi-C マップを開かずに**トラックだけ**表示することもできます。その場合は最初に追加したトラックのファイルから染色体名・長さを読み取り（bigWig はヘッダ、BED / GFF3 / `*_BS.txt` はデータ中の最大座標）、最初の染色体の全長を表示します。移動は Region パネル（染色体選択・領域指定・左右パン・＋/− ズーム）で行います。
 
 - **bigWig / BED**: bigWig は塗りつぶしエリア、BED は区間ボックス。表示範囲だけを rtracklayer で読み込み（rtracklayer は Bioconductor、初回自動導入）。
 - **gene (GFF3)**: 遺伝子を位置・向き（矢印）・名前で表示。+鎖=上段／−鎖=下段。ズームインで exon（CDS 太・UTR 細）。名前は重ならないよう解像度に応じて間引き。初回に `<gff3>.genes.rds` をキャッシュ。

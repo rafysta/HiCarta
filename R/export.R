@@ -31,6 +31,12 @@ fmt_bp <- function(v) {
 
 # Read a square, same-range region matrix for export. Picks a .hic resolution so
 # the region spans ~target_bins bins (capped so the straw read stays reasonable).
+#
+# With a comparison sample attached and st$cmpMode == "split", the two samples
+# are merged exactly as on screen: the upper-right triangle (column >= row, i.e.
+# genomic x >= y) comes from A and the lower-left from B, with B multiplied by
+# st$bfac to match A's sequencing depth. The returned `split` flag lets the
+# caller know it should also draw the diagonal / corner labels.
 read_export_matrix <- function(st, chr, start, end, target_bins = 1500) {
   start <- max(1, as.numeric(start)); end <- as.numeric(end)
   span  <- max(1, end - start + 1)
@@ -41,7 +47,43 @@ read_export_matrix <- function(st, chr, start, end, target_bins = 1500) {
   m <- read_hic_map(st$path, chr = chr, start = start, end = end,
                     resolution = res, normalization = st$norm,
                     chr2 = chr, start2 = start, end2 = end)  # square, same range
-  list(m = m, res = res)
+
+  has_b <- !is.null(st$path2) && nzchar(st$path2)
+  split <- identical(st$cmpMode, "split") && has_b
+  diff  <- identical(st$cmpMode, "diff")  && has_b
+  if (split || diff) {
+    mb <- tryCatch(
+      read_hic_map(st$path2, chr = chr, start = start, end = end,
+                   resolution = res, normalization = st$norm2,
+                   chr2 = chr, start2 = start, end2 = end),
+      error = function(e) NULL)
+    if (is.null(mb) || !identical(dim(mb), dim(m))) {
+      split <- FALSE; diff <- FALSE
+    } else {
+      bf <- st$bfac
+      if (is.null(bf) || length(bf) != 1 || !is.finite(bf) || bf <= 0) bf <- 1
+      mb <- mb * bf
+      if (diff) {
+        # same arithmetic as render_tile(), so the printed figure matches the
+        # screen exactly (eps and the count-difference limit both scale with
+        # bin area; a log2 ratio is dimensionless and does not)
+        f <- (res / (st$ovres %||% res))^2
+        if (identical(st$diffType, "sub")) {
+          m <- m - mb
+        } else {
+          eps <- st$diffEps
+          if (is.null(eps) || length(eps) != 1 || !is.finite(eps) || eps <= 0) eps <- 1
+          m <- log2((m + eps * f) / (mb + eps * f))
+        }
+      } else {
+        # rows = y bins, columns = x bins (same bins on both axes), so the
+        # upper-right half of the picture is column index >= row index.
+        lower <- outer(seq_len(nrow(m)), seq_len(ncol(m)), function(i, j) j < i)
+        m[lower] <- mb[lower]
+      }
+    }
+  }
+  list(m = m, res = res, split = split, diff = diff)
 }
 
 # Draw the contact map (and, optionally, 1-D tracks below it) to the CURRENT
@@ -55,12 +97,71 @@ read_export_matrix <- function(st, chr, start, end, target_bins = 1500) {
 #                margins so columns line up. `draw` receives the margin to use.
 #   map_weight : relative height of the map row vs. track heights (use the
 #                on-screen contact-map height so proportions match the app).
+#   m          : the contact matrix, or NULL to export the tracks alone (no
+#                contact map loaded) - a coordinate axis is drawn instead.
+#   diagonal   : draw a thin line along the diagonal (two-sample split view)
+#   label_a/b  : captions for the upper-right / lower-left halves (split view).
+#                A printed figure travels on its own, so which sample is where
+#                must be readable from the image itself.
+#   diff       : the matrix holds SIGNED differences - colour it with the
+#                diverging palette on the symmetric range [vmin, vmax] (which the
+#                caller sets to -lim / +lim) instead of the sequential one.
 draw_export_map <- function(m, chr, start, end,
                             color = "matlab", vmin = 0, vmax = 1,
                             ticks = TRUE, legend = TRUE, no_margin = FALSE,
-                            tracks = list(), map_weight = 720) {
+                            tracks = list(), map_weight = 720,
+                            diagonal = FALSE, label_a = NULL, label_b = NULL,
+                            diff = FALSE) {
   start <- max(1, as.numeric(start)); end <- as.numeric(end)
-  cols  <- values_to_colors(as.vector(m), color, vmin, vmax)
+
+  # Corner captions + diagonal rule for the split (two-sample) view. Uses
+  # legend() rather than text() because it anchors to the plot-region corners
+  # regardless of the reversed y-axis.
+  .split_marks <- function(cex = 0.8) {
+    if (isTRUE(diagonal))
+      graphics::segments(start, start, end, end, col = "#606060", lwd = 0.8)
+    if (!is.null(label_a) && nzchar(label_a))
+      graphics::legend("topright", legend = label_a, bty = "o", cex = cex,
+                       bg = "#FFFFFFCC", box.col = "#BBBBBB", box.lwd = 0.6,
+                       x.intersp = 0, y.intersp = 0.9, adj = 0)
+    if (!is.null(label_b) && nzchar(label_b))
+      graphics::legend("bottomleft", legend = label_b, bty = "o", cex = cex,
+                       bg = "#FFFFFFCC", box.col = "#BBBBBB", box.lwd = 0.6,
+                       x.intersp = 0, y.intersp = 0.9, adj = 0)
+    invisible()
+  }
+
+  # ---- tracks only (no contact map): a coordinate axis + stacked tracks -----
+  if (is.null(m)) {
+    ntr <- length(tracks)
+    if (ntr == 0) { graphics::plot.new(); return(invisible()) }
+    LEFT  <- if (isTRUE(ticks)) 4.8 else 0.3
+    RIGHT <- 1
+    axis_h    <- if (isTRUE(ticks)) 60 else 1     # thin row holding the x-axis
+    track_mar <- c(0.3, LEFT, 0.3, RIGHT)
+    hts <- c(axis_h, vapply(tracks, function(t) as.numeric(t$height), numeric(1)))
+    graphics::layout(matrix(seq_len(ntr + 1L), ncol = 1), heights = hts)
+    op <- graphics::par(mar = c(0.2, LEFT, 3.6, RIGHT)); on.exit(graphics::par(op))
+    graphics::plot.new()
+    graphics::plot.window(xlim = c(start, end), ylim = c(0, 1), xaxs = "i", yaxs = "i")
+    if (isTRUE(ticks)) {
+      tk <- pretty(c(start, end), n = 6); tk <- tk[tk >= start & tk <= end]
+      graphics::axis(3, at = tk, labels = fmt_bp(tk), tcl = -0.4, mgp = c(3, 0.5, 0))
+      graphics::mtext(chr, side = 3, line = 2.3, cex = 1.0)
+    }
+    for (t in tracks) {
+      dfn <- t$draw
+      if (is.function(dfn)) tryCatch(dfn(track_mar), error = function(e) {
+        graphics::par(mar = track_mar); graphics::plot.new()
+      })
+    }
+    return(invisible())
+  }
+
+  cols  <- if (isTRUE(diff))
+             values_to_diff_colors(as.vector(m), color, max(abs(c(vmin, vmax))))
+           else
+             values_to_colors(as.vector(m), color, vmin, vmax)
   cols[is.na(as.vector(m))] <- "#FFFFFF"                    # opaque white where no data
   ras   <- grDevices::as.raster(matrix(cols, nrow(m), ncol(m)))
 
@@ -72,6 +173,7 @@ draw_export_map <- function(m, chr, start, end,
     graphics::plot.window(xlim = c(start, end), ylim = c(end, start),
                           xaxs = "i", yaxs = "i")
     graphics::rasterImage(ras, start, end, end, start, interpolate = FALSE)
+    .split_marks()
     return(invisible())
   }
 
@@ -113,13 +215,15 @@ draw_export_map <- function(m, chr, start, end,
     graphics::title(ylab = chr, line = 3.4)
     if (ntr == 0) graphics::mtext(chr, side = 3, line = 2.3, cex = 1.0)
   }
+  .split_marks()
   graphics::box()
 
   # ---- legend (colour-scale bar) ----
   if (isTRUE(legend)) {
     graphics::par(mar = if (isTRUE(ticks)) c(body_mar[1], 0.5, body_mar[3], 3.4)
                         else c(0.6, 0.5, 0.6, 3.2))
-    pal <- grDevices::colorRampPalette(hic_palette(color))(256)
+    pal <- grDevices::colorRampPalette(
+             if (isTRUE(diff)) diff_palette(color) else hic_palette(color))(256)
     graphics::plot.new()
     graphics::plot.window(xlim = c(0, 1), ylim = c(vmin, vmax), yaxs = "i")
     yy <- seq(vmin, vmax, length.out = 257)
