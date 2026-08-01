@@ -22,6 +22,8 @@ suppressWarnings(suppressMessages({
 HAS_SHINYFILES <- requireNamespace("shinyFiles", quietly = TRUE)
 
 source("R/i18n.R",        local = TRUE)
+source("R/hic_reader.R",  local = TRUE)
+source("R/bigwig_reader.R", local = TRUE)
 source("R/readers.R",     local = TRUE)
 source("R/juicer_menu.R", local = TRUE)
 source("R/draw.R",        local = TRUE)
@@ -50,7 +52,7 @@ cfg_or <- function(k, d) if (!is.null(CFG[[k]]) && nzchar(CFG[[k]])) CFG[[k]] el
 # Rewrite config.txt from the in-app dialog. Known keys get friendly comments;
 # any other keys already in the file are preserved so nothing is lost.
 write_config <- function(path, values) {
-  known <- c("language", "menu_url", "track_list_url")
+  known <- c("language", "menu_url", "track_list_url", "hic_engine")
   cur   <- read_config(path)
   extra <- cur[setdiff(names(cur), known)]
   v <- function(k) { x <- values[[k]]; if (is.null(x)) "" else trimws(as.character(x)) }
@@ -66,7 +68,13 @@ write_config <- function(path, values) {
     "",
     "# Default track list shown in the Tracks panel. May be a single IGV XML,",
     "# or an index file listing several IGV XML URLs (one per line).",
-    sprintf("track_list_url = %s", v("track_list_url")))
+    sprintf("track_list_url = %s", v("track_list_url")),
+    "",
+    "# How remote files are read (.hic contact maps and bigWig tracks).",
+    "#   native   = stream over HTTP range requests (default; no download)",
+    "#   download = fetch each whole file into _hic_cache first, then read locally",
+    "#   strawr   = legacy strawr / rtracklayer readers (diagnostics; slow for URLs)",
+    sprintf("hic_engine = %s", v("hic_engine")))
   if (length(extra))
     lines <- c(lines, "", "# Other settings",
                vapply(names(extra),
@@ -79,6 +87,9 @@ DEFAULT_TRACKLIST <- cfg_or("track_list_url", "")   # set in config.txt (see con
 # Interface language: default English; config.txt "language = ja" switches to
 # Japanese (or any language defined in R/i18n.R). Chosen once at startup.
 set_language(cfg_or("language", "en"))
+# How remote .hic files are read (see R/readers.R). Re-applied per session below
+# so the settings dialog takes effect on reload without restarting R.
+set_hic_engine(cfg_or("hic_engine", "native"))
 TRK_COLORS  <- c("darkblue", "steelblue", "firebrick", "red", "darkgreen",
                  "seagreen", "purple", "magenta", "orange", "goldenrod", "black", "grey40")
 COLOR_SWATCHES <- tags$div(id = "trk_swatches", style = "margin-bottom:6px;",
@@ -833,6 +844,12 @@ ui <- function(request) {
 }
 
 server <- function(input, output, session) {
+  # Re-read the .hic engine from config.txt on every session. The settings
+  # dialog saves config.txt and calls session$reload(), which starts a new
+  # session but does NOT re-run the top-level script -- so without this the
+  # change would only take effect after restarting R.
+  set_hic_engine(read_config(file.path(getwd(), "config.txt"))[["hic_engine"]])
+
   rv <- reactiveValues(menu = NULL, msg = tr("msg_start"),
                        ov = NULL, ov_res = NULL, chr = NULL, chrlen = NULL,
                        tileURL = NULL, tracks = list(), trk_seq = 0, trk_bins = 1000,
@@ -1075,14 +1092,14 @@ server <- function(input, output, session) {
       clear_cmp(restore_res = FALSE)
       # remote URLs are downloaded once and read locally; local paths pass through
       withProgress(message = tr("prog_cache_hic"), value = 0.3, {
-        path <- tryCatch(hic_local(src),
+        path <- tryCatch(hic_source(src),
                          error = function(e) { message("[cache] download failed: ", conditionMessage(e)); src })
       })
       if (!identical(path, src)) message("[cache] using local file: ", path)
-      res_all <- sort(strawr::readHicBpResolutions(path))
+      res_all <- sort(hic_resolutions(path))
       chrlen  <- .hic_chrom_length(path, chr)
       # confirm the true normalization list from the local file, keep selection
-      norms_local <- tryCatch(strawr::readHicNormTypes(path), error = function(e) NULL)
+      norms_local <- tryCatch(hic_norms(path), error = function(e) NULL)
       if (!is.null(norms_local) && length(norms_local) > 0) {
         sel <- if (!is.null(norm) && norm %in% norms_local) norm else "NONE"
         updateSelectInput(session, "normalization", choices = norms_local, selected = sel)
@@ -1306,11 +1323,11 @@ server <- function(input, output, session) {
     }
     tryCatch({
       withProgress(message = tr("prog_cache_hic"), value = 0.3, {
-        path <- tryCatch(hic_local(src),
+        path <- tryCatch(hic_source(src),
                          error = function(e) { message("[cache B] download failed: ",
                                                        conditionMessage(e)); src })
       })
-      chroms <- strawr::readHicChroms(path)
+      chroms <- hic_chroms(path)
       if (!(rv$chr %in% chroms$name)) {
         clear_cmp(msg = sprintf(tr("msg_cmp_no_chrom"), rv$chr)); return(invisible(NULL))
       }
@@ -1321,7 +1338,7 @@ server <- function(input, output, session) {
                                 format(len_b, big.mark = ",")))
         return(invisible(NULL))
       }
-      res_b  <- sort(strawr::readHicBpResolutions(path))
+      res_b  <- sort(hic_resolutions(path))
       res_a  <- if (!is.null(rv$res_all_a)) rv$res_all_a else rv$res_all
       common <- sort(intersect(res_a, res_b))
       if (!length(common)) {
@@ -1330,7 +1347,7 @@ server <- function(input, output, session) {
                                 paste(res_b, collapse = "/")))
         return(invisible(NULL))
       }
-      norms_b <- tryCatch(strawr::readHicNormTypes(path), error = function(e) NULL)
+      norms_b <- tryCatch(hic_norms(path), error = function(e) NULL)
       if (!is.null(norms_b) && length(norms_b) > 0) {
         sel <- if (!is.null(norm) && norm %in% norms_b) norm else "NONE"
         updateSelectInput(session, "norm_b", choices = norms_b, selected = sel)
@@ -1719,6 +1736,21 @@ server <- function(input, output, session) {
                   selected = if (lang %in% langs) lang else "en"),
       textInput("cfg_menu_url",  tr("cfg_menu_url"),  value = cur_get("menu_url")),
       textInput("cfg_tracklist", tr("cfg_tracklist"), value = cur_get("track_list_url")),
+      # Only the two useful choices are offered. "strawr" is a diagnostic
+      # setting (and pathologically slow for URLs), so it appears in the list
+      # only when config.txt already selects it, rather than being silently
+      # replaced.
+      local({
+        eng <- tolower(cur_get("hic_engine", "native"))
+        if (!(eng %in% HIC_ENGINES)) eng <- "native"
+        ch  <- c(native = tr("cfg_engine_native"),
+                 download = tr("cfg_engine_download"))
+        if (eng == "strawr") ch <- c(ch, strawr = tr("cfg_engine_strawr"))
+        selectInput("cfg_engine", tr("cfg_engine"),
+                    choices  = setNames(names(ch), unname(ch)),
+                    selected = eng)
+      }),
+      p(tags$small(tr("cfg_engine_hint"))),
       tags$label(tr("cfg_raw")),
       tags$pre(style = "max-height:180px;overflow:auto;background:#f7f7f7;padding:8px;", raw),
       footer = tagList(
@@ -1743,7 +1775,8 @@ server <- function(input, output, session) {
   save_cfg_now <- function() write_config(cfg_path, list(
     language       = input$cfg_language,
     menu_url       = input$cfg_menu_url,
-    track_list_url = input$cfg_tracklist))
+    track_list_url = input$cfg_tracklist,
+    hic_engine     = input$cfg_engine))
 
   # Apply & save: write config.txt, then reload the page. Because the UI is a
   # per-request function that re-reads config.txt and re-sets the language on
@@ -2058,7 +2091,9 @@ server <- function(input, output, session) {
     if (is.null(input$trk_path) || !nzchar(input$trk_path)) {
       rv$trk_msg <- tr("msg_enter_track"); return() }
     withProgress(message = tr("prog_cache_trk"), value = 0.4, {
-      lp <- tryCatch(cache_local(input$trk_path),
+      # bigWig is streamed (URL kept as-is); other track types are parsed whole
+      # and still need a local copy.
+      lp <- tryCatch(track_source(input$trk_path),
                      error = function(e) { message("[track] cache failed: ", conditionMessage(e)); input$trk_path })
     })
     ty <- input$trk_type
@@ -2220,7 +2255,7 @@ server <- function(input, output, session) {
       cur_end <- if (!is.null(rv$chrlen)) rv$chrlen else cur_start + 1e6
     chr_choices <- if (!is.null(st$path)) {
       tryCatch({
-        info <- strawr::readHicChroms(st$path)
+        info <- hic_chroms(st$path)
         cc <- info$name[!tolower(info$name) %in% c("all", "assembly")]
         if (length(cc)) cc else c("I", "II", "III")
       }, error = function(e) c("I", "II", "III"))

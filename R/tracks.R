@@ -39,14 +39,57 @@ parse_igv_xml <- function(src) {
   do.call(rbind, out)
 }
 
+# ---------------------------------------------------------------------------
+# bigWig engine.
+#
+# rtracklayer cannot open a bigWig over http(s) (the Bioconductor build has no
+# Kent remote support), so remote tracks used to be downloaded in full before
+# reading. R/bigwig_reader.R streams them instead. Same switch as for .hic:
+#   "native"   stream over HTTP range requests (default)
+#   "download" fetch the whole file into _hic_cache/ first, then use rtracklayer
+# Anything the native reader cannot handle falls back to rtracklayer on a
+# locally cached copy, so an odd file degrades instead of breaking.
+# ---------------------------------------------------------------------------
+.bw_native_ok <- function(path) {
+  exists("bw_reader") && identical(hic_engine(), "native") &&
+    tolower(tools::file_ext(path)) %in% c("bw", "bigwig")
+}
+
+# Path to hand rtracklayer: it needs a local file, so a URL must be cached.
+.track_local <- function(path) cache_local(path)
+
+# Path to store in a track spec when the user adds a track. bigWig is streamed
+# by the native reader, so the URL is kept as-is; every other track type (BED,
+# GFF3, Border Strength) is still parsed whole and needs a local copy.
+track_source <- function(path) {
+  if (.bw_native_ok(path)) path else cache_local(path)
+}
+
 # Read a track over [start,end] on `chr`. Tries the chromosome name as given and
 # common variants (chrII <-> II) so naming differences don't silently blank out.
+# Returns a GRanges (rtracklayer path) or a data.frame(start, end, value).
 .track_import <- function(path, chr, start, end) {
   start <- max(1, floor(start)); end <- ceiling(end)
+
+  if (.bw_native_ok(path)) {
+    iv <- tryCatch(bw_intervals(bw_reader(path), chr, start, end),
+                   error = function(e) {
+                     message("[track] native bigWig reader failed (",
+                             conditionMessage(e), ") - falling back to rtracklayer")
+                     NULL
+                   })
+    if (!is.null(iv)) {
+      if (nrow(iv) == 0) return(NULL)
+      return(GenomicRanges::GRanges(
+        chr, IRanges::IRanges(iv$start, iv$end), score = iv$value))
+    }
+  }
+
+  p <- .track_local(path)
   cand <- unique(c(chr, sub("^chr", "", chr), paste0("chr", chr)))
   for (cc in cand) {
     gr <- tryCatch(
-      rtracklayer::import(path,
+      rtracklayer::import(p,
         which = GenomicRanges::GRanges(cc, IRanges::IRanges(start, end))),
       error = function(e) NULL)
     if (!is.null(gr) && length(gr) > 0) return(gr)
@@ -68,6 +111,26 @@ parse_igv_xml <- function(src) {
   type  <- if (isTRUE(type %in% c("mean", "max"))) type else "mean"
   cand  <- unique(c(chr, sub("^chr", "", chr), paste0("chr", chr)))
 
+  # Native streaming reader first. It uses the file's own zoom levels for wide
+  # views exactly like Kent's code, and full-resolution data when that is small
+  # enough (which is then exact rather than approximate).
+  if (.bw_native_ok(path)) {
+    v <- tryCatch({
+      rd <- bw_reader(path)
+      for (cc in cand) {
+        got <- bw_summary(rd, cc, start, end, nbins, type)
+        if (length(got) == nbins && any(got != 0)) return(got)
+      }
+      bw_summary(rd, cand[1], start, end, nbins, type)
+    }, error = function(e) {
+      message("[track] native bigWig summary failed (", conditionMessage(e),
+              ") - falling back to rtracklayer")
+      NULL
+    })
+    if (!is.null(v) && length(v) == nbins) return(v)
+  }
+
+  path <- .track_local(path)
   bwf <- tryCatch(rtracklayer::BigWigFile(path), error = function(e) NULL)
   if (!is.null(bwf)) {
     for (cc in cand) {

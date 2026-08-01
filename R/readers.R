@@ -82,10 +82,19 @@ read_matrix_map <- function(path, chr = NULL, start = 1, end = NA, ...) {
 }
 
 # ---------------------------------------------------------------------------
-# Local cache for remote .hic files. Reading a remote .hic over HTTPS issues a
-# range request per tile, which is slow. Download the whole file once to a local
-# cache and read from there instead (strawr random-access on a local file is
-# fast). Local paths are returned unchanged.
+# Local cache for remote files.
+#
+# This used to be the only way to make remote .hic usable, because strawr is
+# stateless: it reopens the URL four times per query and, worse,
+# strawr::readHicNormTypes() has no HTTP code path at all -- it reads from the
+# never-opened local ifstream, parses garbage lengths and spins for ~30 s of
+# pure CPU before returning a wrong answer. read_hic_map() called it once per
+# tile, so a single screen cost minutes.
+#
+# R/hic_reader.R replaces that with a stateful reader (one kept-alive
+# connection, cached index and blocks), so .hic files no longer need
+# downloading. This cache is still used for bigWig / track files, and remains
+# available for .hic via hic_engine() == "download".
 # ---------------------------------------------------------------------------
 hic_cache_dir <- function() {
   d <- file.path(getwd(), "_hic_cache")
@@ -110,14 +119,119 @@ cache_local <- function(path, ext = tools::file_ext(path)) {
 hic_local <- function(path) cache_local(path, ext = "hic")
 
 # ---------------------------------------------------------------------------
+# .hic engine
+#   "native"   (default) stateful pure-R reader, R/hic_reader.R. Streams over
+#              HTTP range requests on one kept-alive connection; no download.
+#   "strawr"   legacy strawr path, remote read directly (slow; see above)
+#   "download" legacy strawr path, remote files downloaded to _hic_cache first
+#
+# Set it from config.txt (key `hic_engine`, exposed in the in-app settings
+# dialog) via set_hic_engine(). Precedence, highest first:
+#
+#   1. HICARTA_HIC_ENGINE environment variable   (scripting / one-off runs)
+#   2. options(hicarta.hic_engine = ...)         (R session override)
+#   3. set_hic_engine() <- config.txt            (the settings dialog)
+#   4. "native"
+#
+# The native engine falls back to strawr automatically if it cannot parse a
+# file, so an unexpected .hic variant degrades instead of breaking.
+# ---------------------------------------------------------------------------
+HIC_ENGINES <- c("native", "strawr", "download")
+
+.hic_opts <- new.env(parent = emptyenv())
+.hic_opts$engine <- NULL
+
+# Apply a choice coming from config.txt / the settings dialog. Returns the
+# engine actually in force. Switching drops the cached readers so the next read
+# genuinely goes through the new engine.
+set_hic_engine <- function(e) {
+  e <- tryCatch(tolower(trimws(as.character(e))), error = function(x) "")
+  if (length(e) != 1 || is.na(e) || !nzchar(e)) e <- "native"
+  if (!(e %in% HIC_ENGINES)) {
+    warning("unknown hic_engine '", e, "' - using 'native'", call. = FALSE)
+    e <- "native"
+  }
+  changed <- !identical(.hic_opts$engine, e)
+  .hic_opts$engine <- e
+  if (changed && exists("hic_forget")) try(hic_forget(), silent = TRUE)
+  invisible(hic_engine())
+}
+
+hic_engine <- function() {
+  pick <- function(x) if (length(x) == 1 && !is.na(x) && nzchar(x)) x else ""
+  e <- pick(Sys.getenv("HICARTA_HIC_ENGINE", unset = ""))
+  if (!nzchar(e)) e <- pick(as.character(getOption("hicarta.hic_engine", "")))
+  if (!nzchar(e)) e <- pick(as.character(.hic_opts$engine))
+  if (!nzchar(e) || !(e %in% HIC_ENGINES)) e <- "native"
+  e
+}
+
+.hic_native <- function() hic_engine() == "native" && exists("hic_reader")
+
+# strawr is OPTIONAL now: it is only the fallback for a .hic the native reader
+# cannot parse, and the "strawr"/"download" engines. Guard every use of it so a
+# machine without strawr gets a clear message instead of
+# "there is no package called 'strawr'".
+.have_strawr <- function() requireNamespace("strawr", quietly = TRUE)
+
+.no_strawr <- function(what) {
+  stop("cannot ", what, ": the native .hic reader failed and strawr is not ",
+       "installed to fall back to.\n",
+       "  Install it with  install.packages(\"strawr\")  , or report the file ",
+       "so the reader can be fixed.", call. = FALSE)
+}
+
+# Path handed to the readers for a given source. The native engine streams the
+# URL as-is; only the "download" engine materialises it in _hic_cache first.
+hic_source <- function(src) {
+  if (hic_engine() == "download") hic_local(src) else src
+}
+
+# Metadata accessors. Prefer the native reader: it parses the footer once and
+# caches it, and it is the only one that answers correctly for a URL.
+hic_resolutions <- function(path) {
+  if (.hic_native()) {
+    r <- tryCatch(sort(hic_meta(hic_reader(path))$resolutions),
+                  error = function(e) NULL)
+    if (length(r)) return(r)
+  }
+  if (!.have_strawr()) .no_strawr("list resolutions")
+  sort(strawr::readHicBpResolutions(path))
+}
+
+hic_norms <- function(path) {
+  if (.hic_native()) {
+    r <- tryCatch(hic_meta(hic_reader(path))$norms, error = function(e) NULL)
+    if (length(r)) return(r)
+  }
+  # Never hand a URL to strawr::readHicNormTypes(): ~30 s CPU, wrong answer.
+  if (grepl("^https?://", path)) return("NONE")
+  if (!.have_strawr()) return("NONE")
+  tryCatch(strawr::readHicNormTypes(path), error = function(e) "NONE")
+}
+
+hic_chroms <- function(path) {
+  if (.hic_native()) {
+    r <- tryCatch(hic_meta(hic_reader(path))$chroms, error = function(e) NULL)
+    if (!is.null(r)) return(r)
+  }
+  if (!.have_strawr()) .no_strawr("list chromosomes")
+  strawr::readHicChroms(path)
+}
+
+# ---------------------------------------------------------------------------
 # 3) .hic (Juicer) via strawr -> sparse (bin1,bin2,counts) -> region matrix
 #     path may be a local file OR an https:// URL (strawr streams both).
 # ---------------------------------------------------------------------------
 read_hic_map <- function(path, chr, start = 1, end = NA, resolution = 10000,
                          normalization = "NONE", unit = "BP",
                          chr2 = NULL, start2 = NULL, end2 = NULL) {
-  if (!requireNamespace("strawr", quietly = TRUE)) {
-    stop("Package 'strawr' is required to read .hic files. Run install_libraries.R")
+  # No strawr requirement here any more: .hic is read by the native reader
+  # (R/hic_reader.R) and strawr is only an optional fallback. Remote files do
+  # need curl, though.
+  if (grepl("^https?://", path) && !requireNamespace("curl", quietly = TRUE)) {
+    stop("Reading a .hic over http(s) needs the 'curl' package. ",
+         "Run Rscript R/install_libraries.R", call. = FALSE)
   }
   if (is.null(chr2))   chr2   <- chr
   if (is.null(start2)) start2 <- start
@@ -127,18 +241,18 @@ read_hic_map <- function(path, chr, start = 1, end = NA, resolution = 10000,
 
   # Snap to a resolution / normalization that actually exists in this file.
   # (Each menu dataset is a single-resolution file, so asking for the wrong
-  #  resolution yields strawr's "Error finding block data".)
-  avail_res <- tryCatch(strawr::readHicBpResolutions(path), error = function(e) NULL)
+  #  resolution yields "Error finding block data".)
+  # These lookups are cached per file by the native reader, so unlike the old
+  # strawr calls they cost nothing after the first tile.
+  avail_res <- tryCatch(hic_resolutions(path), error = function(e) NULL)
   if (!is.null(avail_res) && length(avail_res) && !(resolution %in% avail_res)) {
     resolution <- avail_res[which.min(abs(avail_res - resolution))]
   }
-  avail_norm <- tryCatch(strawr::readHicNormTypes(path), error = function(e) "NONE")
+  avail_norm <- tryCatch(hic_norms(path), error = function(e) "NONE")
   if (!(normalization %in% avail_norm)) normalization <- "NONE"
 
-  reg1 <- sprintf("%s:%d:%d", chr,  start,  end)
-  reg2 <- sprintf("%s:%d:%d", chr2, start2, end2)
-
-  d <- strawr::straw(normalization, path, reg1, reg2, unit, resolution)
+  d <- .hic_query(path, chr, start, end, chr2, start2, end2,
+                  resolution, normalization, unit)
   # d has columns x, y, counts (bin start positions in bp)
 
   starts1 <- seq(floor((start - 1) / resolution) * resolution,
@@ -165,18 +279,44 @@ read_hic_map <- function(path, chr, start = 1, end = NA, resolution = 10000,
   m
 }
 
+# ---------------------------------------------------------------------------
+# The actual record query. Native reader first, strawr as a safety net.
+# Returns data.frame(x, y, counts) with x/y = bin start positions in bp,
+# which is exactly strawr::straw()'s contract.
+# ---------------------------------------------------------------------------
+.hic_query <- function(path, chr, start, end, chr2, start2, end2,
+                       resolution, normalization, unit) {
+  if (.hic_native()) {
+    out <- tryCatch(
+      hic_records(hic_reader(path), chr, start, end, chr2, start2, end2,
+                  resolution = resolution, normalization = normalization,
+                  unit = unit),
+      error = function(e) {
+        message("[hic] native reader failed (", conditionMessage(e),
+                ") - falling back to strawr for ", basename(path))
+        NULL
+      })
+    if (!is.null(out)) return(out)
+  }
+  if (!.have_strawr()) .no_strawr(sprintf("read %s", basename(path)))
+  p <- if (hic_engine() == "download") hic_local(path) else path
+  strawr::straw(normalization, p,
+                sprintf("%s:%.0f:%.0f", chr,  start,  end),
+                sprintf("%s:%.0f:%.0f", chr2, start2, end2),
+                unit, resolution)
+}
+
 .hic_chrom_length <- function(path, chr) {
-  info <- strawr::readHicChroms(path)
+  info <- hic_chroms(path)
   as.numeric(info$length[info$name == chr])
 }
 
 # List chromosomes & resolutions available in a .hic (for the UI).
 hic_metadata <- function(path) {
   list(
-    chroms      = strawr::readHicChroms(path),
-    resolutions = strawr::readHicBpResolutions(path),
-    norms       = tryCatch(strawr::readHicNormTypes(path),
-                           error = function(e) c("NONE"))
+    chroms      = hic_chroms(path),
+    resolutions = hic_resolutions(path),
+    norms       = tryCatch(hic_norms(path), error = function(e) c("NONE"))
   )
 }
 

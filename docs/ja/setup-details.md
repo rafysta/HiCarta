@@ -40,8 +40,9 @@ chmod +x run_mac.command
 | RColorBrewer | CRAN | カラーパレット |
 | jsonlite | CRAN | セッションの保存・復元 |
 | shinyFiles | CRAN | ローカルファイルの「参照…」ダイアログ |
-| strawr | CRAN | `.hic` へのランダムアクセス |
-| rtracklayer | Bioconductor | bigWig / BED トラック |
+| curl | CRAN | リモート `.hic` / bigWig の HTTP レンジ読み込み |
+| strawr | CRAN | *任意*。`.hic` の予備リーダー。通常は不要 |
+| rtracklayer | Bioconductor | BED トラック（bigWig は内蔵リーダーが読みます） |
 
 !!! note "rtracklayer は時間がかかります"
     `rtracklayer` は Bioconductor 由来のため、初回のインストールに数分かかることがあります。これは正常です。
@@ -77,9 +78,22 @@ BiocManager::install("rtracklayer")
 
 **Data**（データ）でデータセットが読み込まれ、**移動** で領域が設定されているかを確認し、**マップを開く** をクリックしてください。
 
-### リモートの `.hic` を開くと初回が遅い
+### リモートの `.hic` やトラックが遅い
 
-リモートのファイルは初回だけ `_hic_cache/` にダウンロードされ、次回以降はそのキャッシュから読み込むため高速になります。ディスクの空き容量を増やしたい場合は `_hic_cache/` フォルダを削除して構いません（必要なときに再ダウンロードされます）。
+リモートの `.hic` は**ストリーミング**で読み込みます。表示中の領域だけを HTTP レンジリクエストで取得し、接続は 1 本を使い回します。ディスクには何も書きません。一度表示した領域の中でのパン・ズームはメモリから描かれるため、通信は発生しません。
+
+回線が遅い・不安定な場合は、ファイル全体を一度ダウンロードするほうが快適なことがあります。**設定 → 設定ファイルを編集… → リモートファイルの読み込み方式** で切り替えられます。`config.txt` に直接書いても構いません:
+
+```
+hic_engine = download     # 先にファイル全体を _hic_cache/ に取得する
+hic_engine = native       # ストリーミング（既定）
+```
+
+この設定は **bigWig トラックにも適用されます**。rtracklayer はリモートの bigWig を開くことができない（`Couldn't open ... UCSC library operation failed`）ため、HiCarta は独自のストリーミングリーダーで読み込みます。BED・GFF3・Border Strength のトラックはファイル全体を解析する必要があるため、この設定に関係なく常にダウンロードされます。
+
+`download` の場合、ファイルは `_hic_cache/` に溜まります。空き容量が必要になれば削除して構いません（必要なときに再取得されます）。
+
+3 番目の値として `strawr` があります。これは旧来の [strawr](https://cran.r-project.org/package=strawr) リーダーを使うもので、診断用です。URL に対しては非常に遅くなります（`strawr::readHicNormTypes()` に HTTP のコードパスが無く、1 回の呼び出しで約 30 秒 CPU を空転させたうえ、正規化の一覧を取りこぼします）。
 
 ### 起動時の既定値を変えたい（config.txt）
 

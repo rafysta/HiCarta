@@ -40,8 +40,9 @@ On first launch, the launcher checks for missing packages and, if needed, runs `
 | RColorBrewer | CRAN | Color palettes |
 | jsonlite | CRAN | Saving/restoring sessions |
 | shinyFiles | CRAN | The "Browse…" dialog for local files |
-| strawr | CRAN | Random access to `.hic` |
-| rtracklayer | Bioconductor | bigWig / BED tracks |
+| curl | CRAN | HTTP range reads for remote `.hic` and bigWig |
+| strawr | CRAN | *Optional.* Fallback `.hic` reader; not needed normally |
+| rtracklayer | Bioconductor | BED tracks (bigWig is read by the built-in reader) |
 
 !!! note "rtracklayer takes time"
     `rtracklayer` comes from Bioconductor, so the first install can take a few minutes. This is normal.
@@ -77,9 +78,22 @@ BiocManager::install("rtracklayer")
 
 Check that a dataset is loaded in **Data**, that a region is set in **Navigate**, then click **Open map**.
 
-### The first open of a remote `.hic` is slow
+### A remote `.hic` or track feels slow
 
-A remote file is downloaded to `_hic_cache/` only on the first open; later it is read from that cache, which is fast. If you want to free up disk space, you can delete the `_hic_cache/` folder (it will be re-downloaded when needed).
+Remote `.hic` files are **streamed**: only the part of the map you are looking at is fetched, over HTTP range requests on a single kept-alive connection, and nothing is written to disk. Panning and zooming within a region you have already visited is served from memory and costs no network traffic at all.
+
+If your connection is slow or unreliable, downloading the whole file once can end up smoother. Switch with **Setting → Edit config file… → Remote file reading**, or set it by hand in `config.txt`:
+
+```
+hic_engine = download     # fetch the whole file into _hic_cache/ first
+hic_engine = native       # stream (default)
+```
+
+This setting covers **bigWig tracks too**. rtracklayer cannot open a remote bigWig at all (`Couldn't open ... UCSC library operation failed`), so HiCarta reads them with its own streaming reader. BED, GFF3 and Border Strength tracks are parsed whole and are always downloaded, whatever this is set to.
+
+Under `download`, files accumulate in `_hic_cache/`; you can delete that folder at any time to free space (it will be re-fetched when needed).
+
+There is a third value, `strawr`, which uses the legacy [strawr](https://cran.r-project.org/package=strawr) reader. It exists for diagnostics only and is very slow for URLs — `strawr::readHicNormTypes()` has no HTTP code path, so it spins for ~30 s per call and returns an incomplete normalization list.
 
 ### Change the startup defaults (config.txt)
 

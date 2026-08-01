@@ -26,3 +26,18 @@
 # May be a single IGV XML, or an index file listing several IGV XML URLs
 # (one per line).
 #track_list_url = https://example.com/path/to/igv_data.txt
+
+# How remote files are read -- both .hic contact maps and bigWig tracks.
+# Also selectable in the in-app settings dialog.
+#   native   = stream over HTTP range requests (default). Only the region you
+#              are looking at is fetched, so the first view appears at once and
+#              nothing is written to disk.
+#   download = fetch each whole file into _hic_cache/ first, then read locally.
+#              Slower to the first view and uses disk, but can be smoother on a
+#              slow or unreliable connection.
+#   strawr   = legacy strawr / rtracklayer readers. Diagnostics only; very slow
+#              for URLs, and rtracklayer cannot open a remote bigWig at all, so
+#              tracks are downloaded in this mode.
+# BED, GFF3 and Border Strength tracks are always parsed whole and so are always
+# downloaded, whatever this is set to.
+#hic_engine = native
