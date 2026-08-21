@@ -16,6 +16,18 @@ You can read Juicer-format `.hic` files directly. Pick a sample from your [data 
 
 → [Load a Hi-C map](usage.md#load-hic)
 
+### See the whole genome at once
+
+One view puts every chromosome on both axes, so all chromosome pairs are visible together — cis maps along the diagonal, inter-chromosome maps in the blocks off it. Chromosome names label the axes and the boundaries are ruled, and you can zoom straight into any block from there.
+
+→ [Move around the map](interface.md#navigate)
+
+### View inter-chromosome (trans) contacts
+
+As well as the usual map of one chromosome against itself, you can put a *different* chromosome on the vertical axis and look at the contacts between the two. The map becomes a rectangle, and panning, zooming, the resolution ladder, the color scale, bookmarks and export all work exactly as they do on a normal map. Tracks stay on the horizontal axis.
+
+→ [Move around the map](interface.md#navigate)
+
 ### Overlay 1-D tracks
 
 Below the contact map you can overlay bigWig (quantitative signal), BED (intervals), gene models (GFF3 format) and Border Strength (the strength of domain boundaries such as TADs). Tracks follow the map's horizontal pan/zoom and can be stacked.

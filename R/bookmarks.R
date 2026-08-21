@@ -7,9 +7,13 @@
 # whole picture. Import only ever APPENDS to the current list (per spec).
 #
 # xlsx columns: bookmark_name, catalog_id, path, entry, chr, start, end,
-#               ystart, yend, norm, resolution, vmax, comment
+#               chr_y, ystart, yend, norm, resolution, vmax, comment
 # Required: bookmark_name, chr, start, end. Broken rows are excluded and
 # reported with the name and the reason, like the catalog's own validation.
+#
+# `chr` is the X axis and `chr_y` the Y axis; they differ only for an
+# inter-chromosome (trans) view. An empty or missing chr_y means "same as chr",
+# which is what every bookmark written before trans views existed meant.
 # ============================================================================
 
 if (!exists("%||%")) `%||%` <- function(a, b) if (is.null(a)) b else a
@@ -21,6 +25,7 @@ bookmarks_to_df <- function(bms) {
   empty <- data.frame(bookmark_name = character(0), catalog_id = numeric(0),
                       path = character(0), entry = character(0),
                       chr = character(0), start = numeric(0), end = numeric(0),
+                      chr_y = character(0),
                       ystart = numeric(0), yend = numeric(0),
                       norm = character(0), resolution = numeric(0),
                       vmax = numeric(0), comment = character(0),
@@ -34,6 +39,7 @@ bookmarks_to_df <- function(bms) {
     chr           = as.character(b$chr %||% ""),
     start         = .bm_num(b$x0 %||% NA),
     end           = .bm_num(b$x1 %||% NA),
+    chr_y         = as.character(b$chr_y %||% b$chr %||% ""),
     ystart        = .bm_num(b$y0 %||% NA),
     yend          = .bm_num(b$y1 %||% NA),
     norm          = as.character(b$norm %||% ""),
@@ -70,7 +76,7 @@ read_bookmarks <- function(src) {
                 fatal = sprintf(tr("cat_v_req_missing"),
                                 paste(need, collapse = ", "))))
 
-  nm  <- col("bookmark_name"); ch <- col("chr")
+  nm  <- col("bookmark_name"); ch <- col("chr"); chy <- col("chr_y")
   x0  <- .bm_num(col("start"));  x1 <- .bm_num(col("end"))
   y0  <- .bm_num(col("ystart")); y1 <- .bm_num(col("yend"))
   cid <- .bm_num(col("catalog_id"))
@@ -95,6 +101,7 @@ read_bookmarks <- function(src) {
     }
     rows[[length(rows) + 1L]] <- list(
       name = nm[i], chr = ch[i],
+      chr_y = if (!is.na(chy[i]) && nzchar(chy[i])) chy[i] else ch[i],
       x0 = x0[i], x1 = x1[i],
       y0 = if (is.finite(y0[i])) y0[i] else x0[i],
       y1 = if (is.finite(y1[i])) y1[i] else x1[i],

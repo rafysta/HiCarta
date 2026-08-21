@@ -43,9 +43,17 @@ Save and restore the whole view to and from a file.
 
 Specify the chromosome and region to display, and move around the map.
 
-**Chromosome** — Choose the chromosome to display. Chromosome names follow the internal names in the `.hic` (e.g. `I / II / III` for *S. pombe*). Choosing a different chromosome reopens the map automatically.
+**Chromosome (X axis)** — Choose the chromosome to display. Chromosome names follow the internal names in the `.hic` (e.g. `I / II / III` for *S. pombe*). Choosing a different chromosome reopens the map automatically. Both chromosome lists are filled from the file itself each time a map is opened.
 
-**Y-axis start / Y-axis end (bp)** — Specify the range to display, in bp.
+**X-axis start / X-axis end (bp)** — Specify the range to display, in bp.
+
+**All chromosomes (whole genome)** — The first entry in the X chromosome list. Both axes become every chromosome laid end to end, so all chromosome pairs are on screen at once: the cis maps run down the diagonal and the inter-chromosome maps fill the blocks off it. Chromosome names label both rulers and hairlines mark the boundaries; the cursor readout names the chromosome and the position within it. Panning, zooming, the colour scale, bookmarks, comparison and export all work as usual. Tracks are hidden while this view is open, because a track follows one chromosome's coordinates and has nothing to line up with here — they come back as soon as you choose a chromosome again.
+
+**Chromosome (Y axis)** — Left at **same as X (normal map)** this is the familiar square map of one chromosome against itself. Choosing a *different* chromosome draws the **inter-chromosome (trans) map** between the two: the horizontal axis stays the X chromosome and the vertical axis becomes the one you picked, so the map is a rectangle rather than a square. A badge in the top-left corner names each axis. Tracks always follow the horizontal axis, so they stay meaningful in this view too.
+
+**Y-axis start / Y-axis end (bp)** — The vertical range, shown only when the two axes differ. Picking a Y chromosome fills these in with the whole of it.
+
+Two things work differently on an inter-chromosome map, because it has no diagonal and is not symmetric: the **Split** comparison mode is not offered (use Curtain or Difference instead), and the cursor readout leaves out the distance between the two loci.
 
 **Go to region** — Jump to the chromosome/range you entered.
 
@@ -107,7 +115,9 @@ Click **Open print preview** to open the preview. There you can set:
 - **Destination** — Printer, or File.
 - **Output folder / File name / Format** — The save location and file name for file output, and the format (**Image (PNG)** or **PDF**).
 - **Paper size** — A4 portrait, A4 landscape, Square, or Custom (specify width/height in mm).
-- **Output region** — Chromosome, start and end (bp). For Hi-C, X and Y use the same range.
+- **Output region** — Chromosome, start and end (bp) for each axis. Leaving **Chromosome (Y axis)** at *same as X* exports the usual square map; choosing a different one exports the inter-chromosome map between the two.
+- **Resolution** — Left at *same as the map on screen*, the export is built from the same bins as the picture you are looking at, including a resolution pinned in Display → Map, so the colours match exactly. Choosing a resolution here overrides that; the line under the preview always names the resolution actually used.
+- **Same bp scale on both axes** — On (the default), one base pair is the same physical length horizontally and vertically, so a region is never distorted; the map is centred in the space the paper leaves. Off, the map is stretched to fill the page as it used to be. Tracks stay aligned with the map either way. For an inter-chromosome map, pick a paper size close to the shape of the region to avoid a large blank margin.
 - **Include coordinate ticks / Include legend / No margins** — Toggle the elements included in the output.
 - **Also export tracks** — Export the tracks in view together.
 

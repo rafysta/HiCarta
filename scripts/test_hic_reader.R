@@ -36,6 +36,15 @@ have_strawr <- requireNamespace("strawr", quietly = TRUE)
 if (!have_strawr)
   cat("NOTE: strawr is not installed - skipping comparison, running self-checks only.\n\n")
 
+# readers.R sits one level up from the raw record reader: it turns records into
+# a labelled matrix. Section E needs it (and therefore data.table) to check the
+# orientation of a trans matrix; everything else runs without it.
+rsrc <- file.path(here, "..", "R", "readers.R")
+if (!file.exists(rsrc)) rsrc <- "R/readers.R"
+have_readers <- file.exists(rsrc) && requireNamespace("data.table", quietly = TRUE)
+if (have_readers) source(rsrc) else
+  cat("NOTE: R/readers.R (or data.table) unavailable - skipping the matrix checks.\n\n")
+
 args <- commandArgs(TRUE)
 if (!length(args)) {
   args <- Sys.glob(file.path(here, "..", "_hic_cache", "*.hic"))
@@ -165,6 +174,58 @@ for (path in args) {
       chk(nrow(a) == nrow(b) && all(a$x == b$x) && all(a$y == b$y) &&
             same_counts(a$counts, b$counts), lab,
           sprintf("reader n=%d strawr n=%d", nrow(a), nrow(b)))
+      }
+    }
+  }
+
+  # ---- E) trans matrix orientation (read_hic_map) ------------------------
+  # straw - and this reader, which mirrors it - always order a chromosome pair
+  # by the file's chromosome index and swap the two regions with it, so the
+  # records come back with x on the LOWER-index chromosome whichever way round
+  # the caller asked. read_hic_map() has to undo that, or a trans query asked
+  # "backwards" comes out transposed (or, where the two chromosomes differ in
+  # length, mostly empty). Asking both ways round and comparing is the check.
+  #
+  # The aggregate pseudo-chromosome (All / ALL, index 0) is not a real
+  # chromosome and is skipped.
+  real <- chroms[!(tolower(as.character(chroms$name)) %in% "all"), , drop = FALSE]
+  if (have_readers && nrow(real) > 1) {
+    cat("\n  E) trans matrix orientation (read_hic_map)\n")
+    a1 <- as.character(real$name[1]); L1 <- as.numeric(real$length[1])
+    a2 <- as.character(real$name[2]); L2 <- as.numeric(real$length[2])
+    pres <- tryCatch(hic_chr_resolutions(rd, a1, a2, "NONE"),
+                     error = function(e) numeric(0))
+    if (!length(pres)) {
+      cat(sprintf("    (this file carries no %s x %s matrix - skipped)\n", a1, a2))
+    } else {
+      # coarsest available: the cheapest read that still covers both arms
+      r  <- max(pres)
+      w1 <- min(40 * r, L1); w2 <- min(40 * r, L2)
+      rdm <- function(cA, sA, eA, cB, sB, eB)
+        tryCatch(read_hic_map(path, chr = cA, start = sA, end = eA,
+                              resolution = r, normalization = "NONE",
+                              chr2 = cB, start2 = sB, end2 = eB),
+                 error = function(e) NULL)
+      mAB <- rdm(a1, 1, w1, a2, 1, w2)
+      mBA <- rdm(a2, 1, w2, a1, 1, w1)
+      lab <- sprintf("%s x %s @%s", a1, a2, format(r, scientific = FALSE))
+      if (is.null(mAB) || is.null(mBA)) {
+        chk(FALSE, paste("trans matrix", lab), "read_hic_map errored")
+      } else {
+        chk(identical(dim(mAB), dim(t(mBA))),
+            paste("trans matrix shape", lab),
+            sprintf("%dx%d vs %dx%d", nrow(mAB), ncol(mAB), ncol(mBA), nrow(mBA)))
+        chk(identical(rownames(mAB), colnames(mBA)) &&
+              identical(colnames(mAB), rownames(mBA)),
+            paste("trans matrix bin labels", lab))
+        if (identical(dim(mAB), dim(t(mBA))))
+          chk(same_counts(as.vector(mAB), as.vector(t(mBA))),
+              paste("trans matrix values transpose-equal", lab),
+              sprintf("sums %.4g vs %.4g", sum(mAB, na.rm = TRUE),
+                      sum(mBA, na.rm = TRUE)))
+        # an all-zero pair would make the comparison above pass vacuously
+        chk(sum(mAB, na.rm = TRUE) > 0, paste("trans matrix is non-empty", lab),
+            "both directions read zero - the check above proves nothing")
       }
     }
   }

@@ -273,6 +273,14 @@ read_hic_map <- function(path, chr, start = 1, end = NA, resolution = 10000,
                   resolution, normalization, unit)
   # d has columns x, y, counts (bin start positions in bp)
 
+  # ...but x belongs to whichever of the two chromosomes comes first in the
+  # file, not necessarily to `chr` (see .hic_pair_swapped). Put it back on the
+  # caller's axes before the labels below are matched against it, otherwise a
+  # trans query asked "backwards" comes out transposed.
+  if (.hic_pair_swapped(path, chr, chr2)) {
+    tmp <- d$x; d$x <- d$y; d$y <- tmp
+  }
+
   starts1 <- seq(floor((start - 1) / resolution) * resolution,
                  end, by = resolution)
   starts2 <- seq(floor((start2 - 1) / resolution) * resolution,
@@ -327,6 +335,42 @@ read_hic_map <- function(path, chr, start = 1, end = NA, resolution = 10000,
 .hic_chrom_length <- function(path, chr) {
   info <- hic_chroms(path)
   as.numeric(info$length[info$name == chr])
+}
+
+# ---------------------------------------------------------------------------
+# .hic_pair_swapped(): did the reader hand back the pair in the other order?
+#
+# straw - and the native reader, which deliberately mirrors it - always order a
+# chromosome pair by the file's own chromosome INDEX and swap the two regions
+# along with it. So the records come back with `x` in the LOWER-index
+# chromosome's coordinates no matter which order the caller asked in. For an
+# intra-chromosomal query that is invisible; for a trans query it silently
+# transposes the answer, so read_hic_map() has to know when it happened.
+#
+# Chromosome names are matched the same tolerant way .hic_chr_index() does it
+# (a "chr" prefix on one side only is still the same chromosome). When either
+# name cannot be resolved we report FALSE: the query itself will then fail or
+# return nothing, and guessing a swap on top of that would only confuse the
+# error.
+# ---------------------------------------------------------------------------
+.hic_pair_swapped <- function(path, chr, chr2) {
+  if (identical(chr, chr2)) return(FALSE)
+  info <- tryCatch(hic_chroms(path), error = function(e) NULL)
+  if (is.null(info) || is.null(info$name)) return(FALSE)
+  idx <- function(nm) {
+    i <- match(nm, info$name)
+    if (is.na(i)) {
+      alt <- if (grepl("^chr", nm)) sub("^chr", "", nm) else paste0("chr", nm)
+      i <- match(alt, info$name)
+    }
+    if (is.na(i)) return(NA_real_)
+    # the native reader carries the file's own index column; strawr's
+    # readHicChroms lists them in file order, so the row number serves
+    if (!is.null(info$index)) as.numeric(info$index[i]) else as.numeric(i)
+  }
+  i1 <- idx(chr); i2 <- idx(chr2)
+  if (!is.finite(i1) || !is.finite(i2)) return(FALSE)
+  i1 > i2
 }
 
 # List chromosomes & resolutions available in a .hic (for the UI).

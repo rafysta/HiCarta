@@ -158,6 +158,45 @@ function(el, x) {
   function fmtbp(v){ v=Math.round(v); if(Math.abs(v)>=1e6)return (v/1e6).toFixed(2)+' Mb'; if(Math.abs(v)>=1e3)return (v/1e3).toFixed(0)+' kb'; return String(v); }
   function niceStep(r,n){ var raw=r/n, mag=Math.pow(10,Math.floor(Math.log10(raw))), q=raw/mag, s=(q<1.5)?1:(q<3)?2:(q<7)?5:10; return s*mag; }
   function addEl(p,css,t){ var d=document.createElement('div'); d.style.cssText=css; if(t!=null)d.textContent=t; p.appendChild(d); return d; }
+  // ---- genome-wide rulers -----------------------------------------------
+  // In a genome-wide view the coordinate is a running total over every
+  // chromosome, so bp labels are meaningless. Instead each chromosome gets a
+  // boundary tick and its NAME centred on the part of it that is visible.
+  window._genome = null;
+  Shiny.addCustomMessageHandler('setGenome', function(msg){
+    window._genome = (msg && msg.on) ? {
+      name:   msg.name.map(function(v){ return String(v); }),
+      offset: msg.offset.map(Number),
+      length: msg.length.map(Number)
+    } : null;
+    drawRulers();
+  });
+
+  // draw chromosome names + boundaries along one ruler.
+  //   horiz : true = the top ruler (x), false = the right ruler (y)
+  //   lo/hi : the genomic range visible on that axis
+  //   place : bp -> pixel along the ruler
+  function drawGenomeRuler(el, g, lo, hi, horiz, place, limit){
+    for(var i=0;i<g.name.length;i++){
+      var s=g.offset[i], e=s+g.length[i];
+      if(e<lo||s>hi) continue;
+      var p=place(s);
+      if(i>0 && p>=0 && p<=limit)
+        addEl(el, horiz
+          ? 'position:absolute;left:'+p+'px;top:12px;width:1px;height:12px;background:#333;'
+          : 'position:absolute;left:0;top:'+p+'px;width:12px;height:1px;background:#333;');
+      // the name sits at the middle of the VISIBLE part, so it stays on screen
+      var mid=place((Math.max(s,lo)+Math.min(e,hi))/2);
+      if(mid<0||mid>limit) continue;
+      var wide=Math.abs(place(Math.min(e,hi))-place(Math.max(s,lo)))>18;
+      if(!wide) continue;
+      addEl(el, horiz
+        ? 'position:absolute;left:'+mid+'px;top:4px;transform:translateX(-50%);color:#111;white-space:nowrap;font-weight:600;'
+        : 'position:absolute;left:14px;top:'+mid+'px;transform:translateY(-50%);color:#111;white-space:nowrap;font-weight:600;',
+        g.name[i]);
+    }
+  }
+
   function drawRulers(){
     if(!map._loaded) return;
     var b=map.getBounds(), size=map.getSize();
@@ -165,6 +204,16 @@ function(el, x) {
     var gxMin=toBpX(b.getWest()), gxMax=toBpX(b.getEast());
     var gyTop=toBpY(b.getNorth()), gyBot=toBpY(b.getSouth());
     var xr=gxMax-gxMin, yr=gyBot-gyTop; if(xr<=0||yr<=0) return; var SUB=5;
+    if(window._genome){
+      var g=window._genome;
+      drawGenomeRuler(topR, g, gxMin, gxMax, true, function(bp){
+        return map.latLngToContainerPoint(L.latLng(b.getNorth(), toLng(bp))).x;
+      }, size.x-66);
+      drawGenomeRuler(rightR, g, gyTop, gyBot, false, function(bp){
+        return map.latLngToContainerPoint(L.latLng(toLat(bp), b.getEast())).y;
+      }, size.y);
+      return;
+    }
     var xs=niceStep(xr,7), xsub=xs/SUB;
     for(var gx=Math.ceil(gxMin/xsub)*xsub; gx<=gxMax; gx+=xsub){
       var p=map.latLngToContainerPoint(L.latLng(b.getNorth(), toLng(gx)));
@@ -184,6 +233,20 @@ function(el, x) {
   }
   map.on('move zoom moveend zoomend resize viewreset', drawRulers);
   map.on('moveend', report);
+
+  // ---- axis badge: which chromosome is on which axis --------------------
+  // Only shown for an inter-chromosome map. On a cis map both axes are the
+  // same chromosome, the rulers already say which, and a badge would just be
+  // one more thing covering the top-left corner.
+  var axisBadge = L.DomUtil.create('div', 'hid-axis', map.getContainer());
+  axisBadge.style.cssText = 'position:absolute;top:28px;left:4px;z-index:648;'+
+    'background:rgba(255,255,255,0.88);border:1px solid #bbb;border-radius:3px;'+
+    'padding:2px 7px;font:11px/1.5 sans-serif;color:#111;pointer-events:none;'+
+    'white-space:pre;display:none;';
+  Shiny.addCustomMessageHandler('setAxisLabel', function(msg){
+    if(msg && msg.text){ axisBadge.textContent = msg.text; axisBadge.style.display=''; }
+    else { axisBadge.style.display = 'none'; }
+  });
 
   // How tall the map may be: from its own top edge down to the bottom of the
   // window, minus whatever is stacked below it (tracks).
@@ -436,11 +499,17 @@ function(el, x) {
     window._tileVer = msg.ver;   // cache-buster: forces fresh tiles per Open
     map.setMinZoom(0); map.setMaxZoom(msg.mapMaxZoom);
     if(window._tileLayer){ map.removeLayer(window._tileLayer); window._tileLayer=null; }
-    var U = msg.U;   // map-unit extent of the chromosome
+    // map-unit extent of each axis. They are equal on a cis map and differ on a
+    // trans map, where the drawn area is a rectangle: X (lng) spans the column
+    // chromosome and Y (lat, negative) the row chromosome.
+    var U  = msg.U;
+    var Uy = (msg.Uy != null && isFinite(msg.Uy)) ? msg.Uy : msg.U;
+    window._chrlenX = msg.chrlen;
+    window._chrlenY = (msg.chrlenY != null) ? msg.chrlenY : msg.chrlen;
     // kept so the curtain's sample-B layer can be built with the same geometry
     window._tileOpts = {
       tileSize: 256, noWrap: true,
-      bounds: L.latLngBounds([[-U,0],[0,U]]),
+      bounds: L.latLngBounds([[-Uy,0],[0,U]]),
       minZoom: 0, maxZoom: msg.mapMaxZoom,          // allow over-zoom (upscaled)
       minNativeZoom: 0, maxNativeZoom: msg.maxZoom, // finest real tiles
       keepBuffer: 0,                                // only render visible tiles first (single-threaded R)
@@ -449,7 +518,7 @@ function(el, x) {
     window._tileLayer = new TileLayer(window._tileOpts);
     window._tileLayer.addTo(map);
     rebuildCurtainLayer();       // no-op unless the curtain is currently on
-    map.setMaxBounds(L.latLngBounds([[-U*1.05,-0.05*U],[0.05*U,U*1.05]]));
+    map.setMaxBounds(L.latLngBounds([[-Uy*1.05,-0.05*U],[0.05*Uy,U*1.05]]));
     map.fitBounds([[toLat(msg.fy1), toLng(msg.fx0)],[toLat(msg.fy0), toLng(msg.fx1)]]);
     report(); drawRulers(); updateCurtain();
     }, 60);
@@ -465,7 +534,11 @@ function(el, x) {
   });
   Shiny.addCustomMessageHandler('gotoRegion', function(msg){
     window._scale = msg.scale;
-    map.fitBounds([[toLat(msg.fx1), toLng(msg.fx0)],[toLat(msg.fx0), toLng(msg.fx1)]]);
+    // the Y range defaults to the X one (a square cis view); a trans view sends
+    // its own, because the two axes are different chromosomes
+    var y0 = (msg.fy0 != null) ? msg.fy0 : msg.fx0;
+    var y1 = (msg.fy1 != null) ? msg.fy1 : msg.fx1;
+    map.fitBounds([[toLat(y1), toLng(msg.fx0)],[toLat(y0), toLng(msg.fx1)]]);
   });
   Shiny.addCustomMessageHandler('panView', function(msg){
     if(!map._loaded) return;
@@ -473,7 +546,8 @@ function(el, x) {
     map.panBy([msg.fx * s.x, msg.fy * s.y], {animate: true});
   });
   Shiny.addCustomMessageHandler('viewWhole', function(msg){
-    map.fitBounds([[toLat(msg.chrlen), toLng(0)],[toLat(0), toLng(msg.chrlen)]]);
+    var ly = (msg.chrlenY != null) ? msg.chrlenY : msg.chrlen;
+    map.fitBounds([[toLat(ly), toLng(0)],[toLat(0), toLng(msg.chrlen)]]);
   });
   Shiny.addCustomMessageHandler('gotoView', function(msg){
     // jump to a saved 2-D region (x = genomic X, y = genomic Y)
@@ -771,8 +845,23 @@ ui <- function(request) {
       tags$form(class = "well", role = "complementary",
       conditionalPanel("input.nav == 'Region'",
         selectInput("chr", tr("region_chr"), c("I", "II", "III"), "II"),
-        fluidRow(column(6, numericInput("start", tr("region_ystart"), 1)),
-                 column(6, numericInput("end", tr("region_yend"), 1000000))),
+        # the whole-genome view has no region to type: both axes are always the
+        # entire genome, so the range boxes and the Y selector step aside
+        conditionalPanel("input.chr != '__genome__'",
+          fluidRow(column(6, numericInput("start", tr("region_ystart"), 1)),
+                   column(6, numericInput("end", tr("region_yend"), 1000000)))),
+        conditionalPanel("input.chr == '__genome__'",
+          helpText(tr("region_genome_help"))),
+        # Y axis: "same as X" (the default) is the ordinary square cis map;
+        # naming another chromosome draws the inter-chromosome (trans) map
+        # between the two, with its own range on the vertical axis. Both lists
+        # are refilled from the file whenever a contact map is opened.
+        conditionalPanel("input.chr != '__genome__'",
+          selectInput("chr_y", tr("region_chr_y"),
+                      setNames("", tr("region_chr_same")), ""),
+          conditionalPanel("input.chr_y != ''",
+            fluidRow(column(6, numericInput("ystart", tr("region_y_start"), 1)),
+                     column(6, numericInput("yend", tr("region_y_end"), 1000000))))),
         actionButton("goto", tr("region_goto"), class = "btn-sm btn-primary"),
         hr(),
         tags$label(tr("region_nav")),
@@ -1507,6 +1596,32 @@ server <- function(input, output, session) {
                       selected = selected)
   }
 
+  # Fill BOTH chromosome selectors from the chromosome list of the file that is
+  # open, so the Y axis can be pointed at anything the data actually contains.
+  # The aggregate pseudo-chromosome (All / Assembly, index 0) is not a real
+  # chromosome and is left out. The Y selector keeps "same as X" as its first
+  # choice - that is the ordinary square cis map.
+  #
+  # rv$chr_y_set records the value we are about to push, so the observer below
+  # can tell this programmatic change from one the user made.
+  set_chrom_choices <- function(names_all, sel_x, sel_y) {
+    cc <- as.character(names_all)
+    cc <- cc[!tolower(cc) %in% c("all", "assembly")]
+    if (!length(cc)) return(invisible(NULL))
+    if (!(sel_x %in% cc) && !identical(sel_x, GENOME_KEY))
+      cc <- unique(c(sel_x, cc))
+    # the whole genome sits at the top of the X list; it needs at least two
+    # chromosomes to mean anything
+    xc <- if (length(cc) > 1) setNames(c(GENOME_KEY, cc), c(tr("region_chr_all"), cc))
+          else setNames(cc, cc)
+    updateSelectInput(session, "chr", choices = xc, selected = sel_x)
+    yv <- if (identical(sel_y, sel_x)) "" else sel_y
+    rv$chr_y_set <- yv
+    updateSelectInput(session, "chr_y",
+                      choices  = setNames(c("", cc), c(tr("region_chr_same"), cc)),
+                      selected = yv)
+  }
+
   # Per-file list of the resolutions that are actually usable for `chr` under
   # `norm`. A .hic header lists the resolutions the FILE was built with, but a
   # single chromosome's matrix can carry fewer zoom levels, and a
@@ -1516,22 +1631,82 @@ server <- function(input, output, session) {
   # renderer — is built from this list, so a level the data does not have can
   # never be requested. Falls back to the file's own list if the probe fails,
   # which keeps odd files working exactly as before.
-  res_for_chr <- function(paths, chr, norm) {
+  # `chr2` names the other axis: for a trans map the pair (chr, chr2) can carry
+  # a coarser set of zoom levels than either chromosome does with itself, and
+  # that pair's list is the one the tiles will be read from.
+  res_for_chr <- function(paths, chr, norm, chr2 = chr) {
     lapply(paths, function(p) {
-      r <- tryCatch(hic_resolutions_chr(p, chr, norm), error = function(e) numeric(0))
+      r <- tryCatch(hic_resolutions_chr(p, chr, norm, chr2),
+                    error = function(e) numeric(0))
       if (!length(r)) r <- tryCatch(hic_resolutions(p), error = function(e) numeric(0))
       sort(unique(as.numeric(r)))
     })
   }
 
+  # ---- genome-wide view -----------------------------------------------------
+  # Chosen by picking GENOME_KEY in the chromosome selector: both axes become
+  # the whole genome, laid end to end, so every chromosome pair is on screen at
+  # once (see the tiles.R header).
+
+  # Resolutions the zoom ladder may use for a genome-wide map. Every pair drawn
+  # has to carry them, and probing all n^2 pairs would mean an HTTP range read
+  # each on a remote file - minutes on a large genome. Probing every chromosome
+  # against ITSELF and against the first one is 2n-1 probes and finds the usual
+  # case, where juicer stores trans matrices down to a coarser level than cis.
+  # Any pair that still lacks the level read_hic_map() snaps it for that block.
+  res_for_genome <- function(paths, gen, norm) {
+    probes <- unique(c(
+      lapply(gen$name, function(c1) c(c1, c1)),
+      lapply(gen$name[-1], function(c2) c(gen$name[1], c2))))
+    lapply(paths, function(p) {
+      rs <- lapply(probes, function(pr)
+        tryCatch(hic_resolutions_chr(p, pr[1], norm, pr[2]),
+                 error = function(e) numeric(0)))
+      rs <- rs[vapply(rs, length, integer(1)) > 0]
+      r  <- if (length(rs)) Reduce(intersect, rs) else numeric(0)
+      if (!length(r)) r <- tryCatch(hic_resolutions(p), error = function(e) numeric(0))
+      sort(unique(as.numeric(r)))
+    })
+  }
+
+  # Auto white point for the colour scale: the 99th percentile of the overview.
+  #
+  # That is a good choice for a cis map, where most bins carry signal. A trans
+  # map is far sparser - with raw counts the great majority of bins are 0, and
+  # the 99th percentile can BE 0, which would paint every non-zero pixel fully
+  # saturated. So fall back to the 99th percentile of the values that actually
+  # carry signal, and to the maximum if even that is empty.
+  auto_vmax <- function(vals) {
+    q <- function(v, p) if (length(v)) sort(v)[max(1, round(length(v) * p))] else NA_real_
+    v99 <- q(vals, 0.99)
+    if (is.finite(v99) && v99 > 0) return(v99)
+    p99 <- q(vals[vals > 0], 0.99)
+    if (is.finite(p99) && p99 > 0) return(p99)
+    mx <- suppressWarnings(max(vals, na.rm = TRUE))
+    if (is.finite(mx) && mx > 0) mx else 1
+  }
+
+  # The value the chromosome selector carries for "the whole genome". Not a
+  # chromosome name, so it can never collide with one in the file.
+  GENOME_KEY <- "__genome__"
+
+  # The chromosome on the Y axis. The Region panel's Y selector offers "same as
+  # X" as its first choice (value ""), which is the ordinary square cis map;
+  # any other value makes the map a trans rectangle.
+  resolve_chr_y <- function(cy, chr) {
+    if (is.null(cy) || length(cy) != 1 || is.na(cy) || !nzchar(cy)) chr
+    else as.character(cy)
+  }
+
   # per-file brightness factors for a virtual dataset (see tiles.R header):
   # whole-chromosome sums at each file's own coarsest resolution, expressed
   # relative to the reference file. Recomputed on a normalization switch.
-  compute_vfac <- function(paths, res_by, chr, norm, refpath) {
+  compute_vfac <- function(paths, res_by, chr, norm, refpath, chr2 = chr) {
     S <- vapply(seq_along(paths), function(fi) {
       rc <- max(res_by[[fi]])
       m  <- tryCatch(read_hic_map(paths[fi], chr = chr, start = 1, end = NA,
-                                  resolution = rc, normalization = norm),
+                                  resolution = rc, normalization = norm,
+                                  chr2 = chr2, start2 = 1, end2 = NA),
                      error = function(e) NULL)
       if (is.null(m)) return(NA_real_)
       v <- as.numeric(m); v <- v[is.finite(v)]
@@ -1563,13 +1738,18 @@ server <- function(input, output, session) {
   #   vmax      : NULL = auto-scale (99th percentile); catalog set_vmax lands here
   #   fixed_res : pin the map to (the nearest available) resolution instead of
   #               the zoom-driven automatic choice; catalog set_resolution
+  #   chr_y     : the chromosome on the Y axis. NULL / "" / the same name as
+  #               `chr` gives the ordinary square cis map; a different
+  #               chromosome gives a rectangular INTER-CHROMOSOME (trans) map
   do_open <- function(src = current_src(), chr = input$chr,
                       start = input$start, end = input$end,
-                      ystart = start, yend = end,
+                      ystart = NULL, yend = NULL,
+                      chr_y = input$chr_y,
                       norm = NULL, color = input$color,
                       vmax = NULL, name = NULL, fixed_res = NULL) {
     if (is.null(src)) { rv$msg <- tr("msg_pick_src"); return() }
     tryCatch({
+      chr_y <- resolve_chr_y(chr_y, chr)
       # A comparison sample is tied to A's chromosome and resolution set, both of
       # which are about to change. Detach it now and re-attach (re-validating it
       # against the new chromosome) once A is open.
@@ -1590,13 +1770,48 @@ server <- function(input, output, session) {
       # Umap and the initTiles payload, where jsonlite serializes a NAMED
       # scalar as an OBJECT ({path: value}) instead of a number — the browser
       # then computes NaN bounds and the tile layer is never created
-      lens   <- vapply(paths, function(p) .hic_chrom_length(p, chr),
-                       numeric(1), USE.NAMES = FALSE)
+      # A Y chromosome that this file does not have (a bookmark or session from
+      # another genome) is not worth failing over: fall back to the cis map and
+      # say so.
+      file_info   <- tryCatch(hic_chroms(paths[1]), error = function(e) NULL)
+      file_chroms <- if (is.null(file_info)) character(0)
+                     else as.character(file_info$name)
+      if (length(file_chroms)) {
+        cl <- suppressWarnings(as.numeric(file_info$length))
+        names(cl) <- file_chroms
+        # kept for the Region panel: picking a Y chromosome prefills its range
+        rv$chrom_len <- cl[!tolower(names(cl)) %in% c("all", "assembly")]
+      }
+      # Genome-wide: both axes are every chromosome laid end to end. There is
+      # no separate Y chromosome to resolve, and the map is symmetric, so it
+      # counts as cis for everything that depends on the diagonal.
+      genome_mode <- identical(chr, GENOME_KEY) || identical(chr_y, GENOME_KEY)
+      gen <- NULL
+      note <- ""
+      if (genome_mode) {
+        if (is.null(file_info)) stop(tr("msg_no_genome"))
+        gen <- make_genome(file_info$name, file_info$length)
+        if (is.null(gen) || length(gen$name) < 2) stop(tr("msg_no_genome"))
+        chr <- GENOME_KEY; chr_y <- GENOME_KEY
+      } else if (length(file_chroms) && !(chr_y %in% file_chroms)) {
+        note  <- sprintf(tr("msg_no_chr_y"), chr_y)
+        chr_y <- chr
+      }
+      trans <- !identical(chr, chr_y)
+
+      lens   <- if (genome_mode) rep(gen$total, length(paths))
+                else vapply(paths, function(p) .hic_chrom_length(p, chr),
+                            numeric(1), USE.NAMES = FALSE)
+      lens_y <- if (genome_mode || !trans) lens
+                else vapply(paths, function(p) .hic_chrom_length(p, chr_y),
+                            numeric(1), USE.NAMES = FALSE)
       # the virtual dataset only makes sense on one genome: every file must
       # agree on this chromosome's length
-      if (virt && length(unique(round(lens))) != 1)
+      if (virt && (length(unique(round(lens))) != 1 ||
+                   length(unique(round(lens_y))) != 1))
         stop(sprintf(tr("msg_virt_chrlen"), chr))
-      chrlen  <- lens[1]
+      chrlen   <- lens[1]      # X axis (columns) - the axis the tracks follow
+      chrlen_y <- lens_y[1]    # Y axis (rows); equal to chrlen on a cis map
       # available normalizations: the file's own list; for a virtual dataset
       # the INTERSECTION across files (a norm must be readable everywhere).
       # Picked BEFORE the resolutions, because which resolutions are usable
@@ -1614,9 +1829,15 @@ server <- function(input, output, session) {
       # globally (see hic_resolutions_chr in R/readers.R). Building the ladder
       # from the header would let the deepest zoom ask for a level the
       # chromosome has no data at — every tile would come back blank.
-      res_by  <- res_for_chr(paths, chr, norm)
+      res_by  <- if (genome_mode)
+                   withProgress(message = tr("prog_genome_res"), value = 0.4,
+                                res_for_genome(paths, gen, norm))
+                 else res_for_chr(paths, chr, norm, chr_y)
       res_all <- sort(unique(unlist(res_by)))
-      if (!length(res_all)) stop(sprintf(tr("msg_no_res"), chr))
+      if (!length(res_all))
+        stop(sprintf(tr("msg_no_res"),
+                     if (genome_mode) tr("region_chr_all")
+                     else if (trans) paste(chr, "x", chr_y) else chr))
       # virtual: which file serves each resolution (the first file that has it)
       vmap <- NULL
       if (virt) {
@@ -1629,11 +1850,17 @@ server <- function(input, output, session) {
       # overview at a moderate resolution (~400 bins across the chromosome),
       # not the very coarsest — gives a meaningful default scale & hover score.
       # Its file is the REFERENCE for the cross-file brightness factors below.
-      ovres  <- choose_res(chrlen / 400, res_all)
+      ovres  <- choose_res(max(chrlen, chrlen_y) / 400, res_all)
       ovpath <- if (virt) vmap[[as.character(ovres)]] else paths[1]
       withProgress(message = tr("prog_overview"), value = 0.5, {
-        rv$ov     <- read_hic_map(ovpath, chr = chr, start = 1, end = NA,
-                                  resolution = ovres, normalization = norm)
+        # rows = Y chromosome, columns = X - the orientation the hover readout
+        # and the tile renderer both assume
+        rv$ov     <- if (genome_mode)
+                       read_genome_map(ovpath, gen, ovres, norm)
+                     else
+                       read_hic_map(ovpath, chr = chr_y, start = 1, end = NA,
+                                    resolution = ovres, normalization = norm,
+                                    chr2 = chr, start2 = 1, end2 = NA)
         rv$ov_res <- ovres
       })
       # Cross-file brightness factors: whole-chromosome sums are essentially
@@ -1644,15 +1871,22 @@ server <- function(input, output, session) {
       vfac <- NULL
       if (virt) {
         withProgress(message = tr("prog_virt_scale"), value = 0.7, {
-          vfac <- compute_vfac(paths, res_by, chr, norm, ovpath)
+          # a genome-wide dataset is scaled from the first chromosome, which
+          # every file in the set has; GENOME_KEY is not a readable name
+          vfac <- if (genome_mode)
+            compute_vfac(paths, res_by, gen$name[1], norm, ovpath, gen$name[1])
+          else compute_vfac(paths, res_by, chr, norm, ovpath, chr_y)
         })
         message("[virt] files=", length(paths),
                 " res=", paste(res_all, collapse = "/"),
                 " fac=", paste(signif(unlist(vfac), 3), collapse = "/"))
       }
       path <- ovpath
-      rv$chr <- chr; rv$chrlen <- chrlen
-      rv$open_key <- paste(paste(srcs, collapse = "|"), chr)
+      rv$chr <- chr; rv$chrlen <- chrlen           # X axis (tracks follow it)
+      rv$chr_y <- chr_y; rv$chrlen_y <- chrlen_y   # Y axis
+      rv$trans <- trans
+      rv$genome <- gen                             # NULL unless genome-wide
+      rv$open_key <- paste(paste(srcs, collapse = "|"), chr, chr_y)
       # human-readable name of the sample now on screen: local file -> basename;
       # menu dataset -> "sample label / dataset label" looked up in the menu.
       rv$sample_name <- {
@@ -1660,25 +1894,34 @@ server <- function(input, output, session) {
         else basename(srcs[1])
       }
       vals <- as.numeric(rv$ov); vals <- vals[is.finite(vals)]
-      p99  <- sort(vals)[max(1, round(length(vals) * 0.99))]
+      p99  <- auto_vmax(vals)
       rv$restore_vmax <- vmax     # seeds the value-scale UI (NULL = auto p99)
       rv$dmin <- min(vals); rv$dmax <- max(vals)
       pos <- vals[vals > 0]; rv$dfloor <- if (length(pos)) min(pos) else 1
       rv$p99 <- p99
       rv$logmin <- log10(rv$dfloor); rv$logmax <- log10(max(rv$dmax, rv$dfloor * 10))
 
-      # deep-zoom coordinate system (non-negative zoom, standard slippy tiling)
+      # deep-zoom coordinate system (non-negative zoom, standard slippy tiling).
+      # ONE bp-per-map-unit scale serves both axes - only the extent differs, so
+      # a trans map is simply a rectangle in the same coordinate system. The
+      # zoom ladder is sized by the LONGER axis so the finer one is never
+      # under-zoomed.
       baseRes <- min(res_all)
-      Nfine   <- ceiling(chrlen / baseRes)                 # finest bins
+      Nfine   <- ceiling(max(chrlen, chrlen_y) / baseRes)   # finest bins
       maxZoom <- max(1, ceiling(log2(Nfine / TILE_PX)))     # zoom levels 0..maxZoom
       SCALE   <- baseRes * 2^maxZoom                        # bp per map-unit
-      Umap    <- chrlen / SCALE                             # chromosome extent in map-units
+      Umap    <- chrlen   / SCALE                           # X extent in map-units
+      Umap_y  <- chrlen_y / SCALE                           # Y extent in map-units
       rv$scale <- SCALE
       rv$res_all <- res_all; rv$baseRes <- baseRes; rv$maxZoom <- maxZoom
 
       # fill tile-render state (read by the HTTP handler)
       st$type <- "hic"; st$db <- NULL
-      st$path <- path; st$chr <- chr; st$chrlen <- chrlen
+      st$path <- path
+      st$chrX <- chr;   st$lenX <- chrlen      # columns
+      st$chrY <- chr_y; st$lenY <- chrlen_y    # rows
+      st$trans <- trans
+      st$genome <- gen                         # NULL unless genome-wide
       st$res <- res_all; st$norm <- norm
       st$vmap <- vmap; st$vfac <- vfac    # NULL unless a virtual dataset
       st$vpaths <- if (virt) paths else NULL   # for vfac recompute on a
@@ -1709,10 +1952,22 @@ server <- function(input, output, session) {
       url <- register_tiles()
       mapMaxZoom <- maxZoom + 6      # allow zooming in past the finest tiles (upscaled)
       ver <- as.numeric(Sys.time())  # cache-buster so re-Open replaces old tiles
-      message(sprintf("[open] chr=%s chrlen=%d baseRes=%d maxZoom=%d mapMaxZoom=%d SCALE=%g U=%g",
-                      chr, chrlen, baseRes, maxZoom, mapMaxZoom, SCALE, Umap))
+      message(sprintf(paste0("[open] x=%s (%.0f bp) y=%s (%.0f bp) baseRes=%d ",
+                             "maxZoom=%d mapMaxZoom=%d SCALE=%g U=%g/%g"),
+                      chr, chrlen, chr_y, chrlen_y, baseRes, maxZoom,
+                      mapMaxZoom, SCALE, Umap, Umap_y))
+      # Vertical window. Callers that know one pass it; otherwise a cis map
+      # opens square (the same range on both axes, as it always has) and a
+      # trans map opens on the whole of its Y chromosome, since the X range
+      # describes a different chromosome and may not even fit inside this one.
+      if (is.null(ystart)) ystart <- if (trans) 1 else start
+      if (is.null(yend))   yend   <- if (trans) chrlen_y else end
       fx0 <- max(1, start);  fx1 <- min(chrlen, end)
-      fy0 <- max(1, ystart); fy1 <- min(chrlen, yend)
+      fy0 <- max(1, ystart); fy1 <- min(chrlen_y, yend)
+      # a window that misses this chromosome entirely (a stale range from a
+      # longer one) would open on an empty strip; show the whole of it instead
+      if (!is.finite(fy1) || fy1 <= fy0) { fy0 <- 1; fy1 <- chrlen_y }
+      if (!is.finite(fx1) || fx1 <= fx0) { fx0 <- 1; fx1 <- chrlen }
       # leaving track-only mode: reveal the contact map, then (re)fit the
       # layout so map + tracks share the window as usual.
       first_map <- !isTRUE(rv$has_hic)
@@ -1720,11 +1975,33 @@ server <- function(input, output, session) {
       rv$tv_x0 <- NULL; rv$tv_x1 <- NULL
       session$sendCustomMessage("showMap", list(show = TRUE))
       session$sendCustomMessage("initTiles", list(
-        url = url, scale = SCALE, U = Umap, maxZoom = maxZoom, mapMaxZoom = mapMaxZoom,
-        ver = ver, chrlen = chrlen, fx0 = fx0, fy0 = fy0, fx1 = fx1, fy1 = fy1))
-      rv$msg <- sprintf(tr("msg_ready"),
-                        chr, format(chrlen, big.mark = ","),
-                        paste(res_all, collapse = "/"))
+        url = url, scale = SCALE, U = Umap, Uy = Umap_y,
+        maxZoom = maxZoom, mapMaxZoom = mapMaxZoom,
+        ver = ver, chrlen = chrlen, chrlenY = chrlen_y,
+        fx0 = fx0, fy0 = fy0, fx1 = fx1, fy1 = fy1))
+      rv$msg <- paste0(
+        if (genome_mode)
+          sprintf(tr("msg_ready_genome"), length(gen$name),
+                  format(round(gen$total), big.mark = ","),
+                  paste(res_all, collapse = "/"))
+        else if (trans)
+          sprintf(tr("msg_ready_trans"), chr, format(chrlen, big.mark = ","),
+                  chr_y, format(chrlen_y, big.mark = ","),
+                  paste(res_all, collapse = "/"))
+        else
+          sprintf(tr("msg_ready"), chr, format(chrlen, big.mark = ","),
+                  paste(res_all, collapse = "/")),
+        if (nzchar(note)) paste0("\n", note) else "")
+      # Both chromosome selectors are filled from the file that is now open, so
+      # the Y axis can be pointed at any chromosome the data actually has.
+      set_chrom_choices(file_chroms, chr, chr_y)
+      session$sendCustomMessage("setAxisLabel", list(
+        text = if (trans) sprintf("X: %s\nY: %s", chr, chr_y) else NULL))
+      # the browser needs the chromosome table to label a genome-wide ruler
+      session$sendCustomMessage("setGenome", if (genome_mode)
+        list(on = TRUE, name = as.list(gen$name),
+             offset = as.list(gen$offset), length = as.list(gen$length))
+        else list(on = FALSE))
       if (first_map && length(rv$tracks) > 0) {
         tot <- sum(vapply(rv$tracks, function(t) as.numeric(t$height) + 6, numeric(1)))
         session$sendCustomMessage("fitMap", list(tracksTotal = tot))
@@ -1864,22 +2141,37 @@ server <- function(input, output, session) {
                                                        conditionMessage(e)); src })
       })
       chroms <- hic_chroms(path)
-      if (!(rv$chr %in% chroms$name)) {
-        clear_cmp(msg = sprintf(tr("msg_cmp_no_chrom"), rv$chr)); return(invisible(NULL))
-      }
-      len_b <- as.numeric(chroms$length[chroms$name == rv$chr])[1]
-      if (!isTRUE(all.equal(as.numeric(len_b), as.numeric(rv$chrlen)))) {
-        clear_cmp(msg = sprintf(tr("msg_cmp_len"), rv$chr,
-                                format(rv$chrlen, big.mark = ","),
-                                format(len_b, big.mark = ",")))
-        return(invisible(NULL))
+      # B is drawn in the SAME coordinate system as A, so it has to carry both
+      # of A's axes at the same lengths - on a trans map that is two different
+      # chromosomes, on a cis map the check simply runs twice on one, and on a
+      # genome-wide map every chromosome has to match.
+      gen_now  <- rv$genome
+      chry_now <- rv$chr_y %||% rv$chr
+      leny_now <- rv$chrlen_y %||% rv$chrlen
+      axes <- if (!is.null(gen_now))
+                lapply(seq_along(gen_now$name),
+                       function(k) list(gen_now$name[k], gen_now$length[k]))
+              else list(list(rv$chr, rv$chrlen), list(chry_now, leny_now))
+      for (ax in axes) {
+        cc <- ax[[1]]; ll <- ax[[2]]
+        if (!(cc %in% chroms$name)) {
+          clear_cmp(msg = sprintf(tr("msg_cmp_no_chrom"), cc)); return(invisible(NULL))
+        }
+        len_b <- as.numeric(chroms$length[chroms$name == cc])[1]
+        if (!isTRUE(all.equal(as.numeric(len_b), as.numeric(ll)))) {
+          clear_cmp(msg = sprintf(tr("msg_cmp_len"), cc,
+                                  format(ll, big.mark = ","),
+                                  format(len_b, big.mark = ",")))
+          return(invisible(NULL))
+        }
       }
       norms_b <- tryCatch(hic_norms(path), error = function(e) character(0))
       norm <- pick_norm(norm, norms_b)   # explicit if offered, else ICE->KR->Raw
       # B's resolutions for THIS chromosome under THIS normalization, for the
       # same reason as sample A's (see res_for_chr): the header list can
       # advertise levels the chromosome has no data at.
-      res_b  <- res_for_chr(path, rv$chr, norm)[[1]]
+      res_b  <- if (!is.null(gen_now)) res_for_genome(path, gen_now, norm)[[1]]
+                else res_for_chr(path, rv$chr, norm, chry_now)[[1]]
       res_a  <- if (!is.null(rv$res_all_a)) rv$res_all_a else rv$res_all
       common <- sort(intersect(res_a, res_b))
       if (!length(common)) {
@@ -1891,10 +2183,14 @@ server <- function(input, output, session) {
       # Read B's overview at A's overview resolution when the file has it, so
       # the two totals behind the depth factor are computed the same way.
       ovres_b <- if (!is.null(rv$ov_res) && rv$ov_res %in% res_b) rv$ov_res
-                 else choose_res(rv$chrlen / 400, res_b)
+                 else choose_res(max(rv$chrlen, leny_now) / 400, res_b)
       withProgress(message = tr("prog_cmp_overview"), value = 0.5, {
-        ov_b <- read_hic_map(path, chr = rv$chr, start = 1, end = NA,
-                             resolution = ovres_b, normalization = norm)
+        ov_b <- if (!is.null(gen_now))
+                  read_genome_map(path, gen_now, ovres_b, norm)
+                else
+                  read_hic_map(path, chr = chry_now, start = 1, end = NA,
+                               resolution = ovres_b, normalization = norm,
+                               chr2 = rv$chr, start2 = 1, end2 = NA)
       })
       tot_a <- total_counts(rv$ov); tot_b <- total_counts(ov_b)
       bf <- if (is.finite(tot_a) && is.finite(tot_b) && tot_b > 0) tot_a / tot_b else 1
@@ -1986,12 +2282,22 @@ server <- function(input, output, session) {
     dlg0  <- isolate(input$cmp_diff_lim_log2) %||% isolate(rv$cmp_dlim_log2_def) %||% rv$diff_lim_log2
     dsb0  <- isolate(input$cmp_diff_lim_sub)  %||% isolate(rv$cmp_dlim_sub_def)  %||% rv$diff_lim_sub
     dep0e <- isolate(input$cmp_diff_eps)   %||% isolate(rv$cmp_deps_def)  %||% rv$diff_eps_auto
+    # The split view divides the map along the diagonal, using the fact that a
+    # cis matrix says the same thing on both sides of it. An inter-chromosome
+    # map has no diagonal and no such symmetry, so the mode is not offered
+    # there - the curtain and difference views serve the same purpose and work
+    # on any geometry.
+    trans <- isTRUE(rv$trans)
+    modes <- if (trans) c("single", "curtain", "diff")
+             else       c("single", "split", "curtain", "diff")
+    mlabs <- c(single = tr("cmp_mode_single"), split = tr("cmp_mode_split"),
+               curtain = tr("cmp_mode_curtain"), diff = tr("cmp_mode_diff"))
+    if (!(mode0 %in% modes)) mode0 <- "curtain"   # e.g. split, left over from a cis view
     tagList(
       radioButtons("cmp_mode", tr("cmp_mode"),
-                   choices = setNames(c("single", "split", "curtain", "diff"),
-                                      c(tr("cmp_mode_single"), tr("cmp_mode_split"),
-                                        tr("cmp_mode_curtain"), tr("cmp_mode_diff"))),
+                   choices = setNames(modes, unname(mlabs[modes])),
                    selected = mode0),
+      if (trans) helpText(tr("cmp_no_split_trans")),
       # curtain: keyboard-driven blink comparison + a manual A/B button for
       # people who would rather not learn the shortcut
       conditionalPanel("input.cmp_mode == 'curtain'",
@@ -2067,7 +2373,8 @@ server <- function(input, output, session) {
       agg = if (is.null(t$agg)) "mean" else t$agg,
       bins = t$bins %||% rv$trk_bins))
     bookmarks <- lapply(unname(rv$bookmarks), function(b) list(
-      name = b$name, chr = b$chr, x0 = b$x0, x1 = b$x1, y0 = b$y0, y1 = b$y1,
+      name = b$name, chr = b$chr, chr_y = b$chr_y %||% b$chr,
+      x0 = b$x0, x1 = b$x1, y0 = b$y0, y1 = b$y1,
       cat_id = b$cat_id %||% NA, path = b$path %||% "",
       entry = b$entry %||% "", norm = b$norm %||% "",
       resolution = b$resolution %||% NA, vmax = b$vmax %||% NA,
@@ -2088,6 +2395,7 @@ server <- function(input, output, session) {
            else NULL
     list(app = "HiCarta", format = 1L,
          hic = list(src = current_src(), chr = rv$chr,
+                    chr_y = rv$chr_y %||% rv$chr,
                     normalization = st$norm %||% "NONE"),
          compare = cmp,
          region = region,
@@ -2134,7 +2442,8 @@ server <- function(input, output, session) {
     for (b in (sess$bookmarks %||% list())) {
       bn <- bn + 1L
       bl[[as.character(bn)]] <- list(id = bn, name = b$name %||% sprintf("bm%d", bn),
-        chr = b$chr, x0 = b$x0, x1 = b$x1, y0 = b$y0, y1 = b$y1,
+        chr = b$chr, chr_y = b$chr_y %||% b$chr,
+        x0 = b$x0, x1 = b$x1, y0 = b$y0, y1 = b$y1,
         cat_id = b$cat_id %||% NA, path = b$path %||% "",
         entry = b$entry %||% "", norm = b$norm %||% "",
         resolution = b$resolution %||% NA, vmax = b$vmax %||% NA,
@@ -2160,6 +2469,7 @@ server <- function(input, output, session) {
 
     # open with explicit values so we don't depend on async input updates
     do_open(src = hic_src, chr = hic$chr %||% input$chr,
+            chr_y = hic$chr_y %||% hic$chr %||% input$chr,
             start = reg$start %||% 1, end = reg$end %||% 1e12,
             ystart = reg$ystart %||% reg$start %||% 1,
             yend = reg$yend %||% reg$end %||% 1e12,
@@ -2438,15 +2748,69 @@ server <- function(input, output, session) {
     }
     src <- current_src()
     if (is.null(src)) { rv$msg <- tr("msg_pick_src"); return() }
+    # already on the whole genome: there is no sub-region to go to, so Go
+    # simply frames all of it again
+    if (!is.null(rv$genome) && identical(input$chr, GENOME_KEY)) {
+      session$sendCustomMessage("viewWhole", list(
+        chrlen = rv$chrlen, chrlenY = rv$chrlen_y %||% rv$chrlen))
+      return()
+    }
+    cy <- resolve_chr_y(input$chr_y, input$chr)
     if (is.null(rv$open_key) ||
-        !identical(rv$open_key, paste(paste(src, collapse = "|"), input$chr))) {
-      # different chromosome or dataset -> full open; keep the current norm
-      do_open(norm = st$norm)
+        !identical(rv$open_key,
+                   paste(paste(src, collapse = "|"), input$chr, cy))) {
+      # different chromosome pair or dataset -> full open; keep the current norm
+      yr <- y_region()
+      do_open(norm = st$norm, ystart = yr$start, yend = yr$end)
     } else {
+      # same pair: just pan/zoom. On a trans map the vertical axis has its own
+      # range and its own chromosome length to clamp against.
+      yr <- y_region()
       session$sendCustomMessage("gotoRegion", list(
-        scale = rv$scale, fx0 = max(1, input$start), fx1 = min(rv$chrlen, input$end)))
+        scale = rv$scale,
+        fx0 = max(1, input$start), fx1 = min(rv$chrlen, input$end),
+        fy0 = yr$start, fy1 = yr$end))
     }
   })
+
+  # Length of one chromosome of the open file, or NULL if it has no such
+  # chromosome (rv$chrom_len is filled by do_open from the file's own list).
+  chrom_len_of <- function(nm) {
+    if (is.null(rv$chrom_len) || is.null(nm) || !nzchar(nm)) return(NULL)
+    v <- suppressWarnings(as.numeric(rv$chrom_len[nm]))
+    if (length(v) != 1 || !is.finite(v)) NULL else v
+  }
+
+  # The vertical range to open or jump to: the Y inputs on a trans map, the X
+  # range (a square view) on a cis one. The clamp comes from the chromosome
+  # the Y selector names RIGHT NOW - rv$chrlen_y still describes the map on
+  # screen, which is the wrong chromosome when the selection has just changed.
+  y_region <- function() {
+    cy   <- resolve_chr_y(input$chr_y, input$chr)
+    cis  <- identical(cy, input$chr)
+    len  <- if (cis) rv$chrlen else chrom_len_of(cy)
+    s <- suppressWarnings(as.numeric(if (cis) input$start else input$ystart))
+    e <- suppressWarnings(as.numeric(if (cis) input$end   else input$yend))
+    if (!is.finite(s) || s < 1) s <- 1
+    if (!is.finite(e) || e <= s)
+      e <- if (is.null(len)) s + 1e6 else len
+    if (!is.null(len)) e <- min(e, len)
+    list(start = s, end = e)
+  }
+
+  # Picking a chromosome for the Y axis prefills its range with the whole of
+  # that chromosome - the X range is about the wrong chromosome and would often
+  # land outside it. rv$chr_y_set marks the value set_chrom_choices() just
+  # pushed, so restoring a saved view does not overwrite its stored Y range.
+  observeEvent(input$chr_y, {
+    cy <- input$chr_y %||% ""
+    if (identical(cy, rv$chr_y_set %||% NA_character_)) { rv$chr_y_set <- NULL; return() }
+    rv$chr_y_set <- NULL
+    len <- chrom_len_of(cy)
+    if (is.null(len)) return()
+    updateNumericInput(session, "ystart", value = 1)
+    updateNumericInput(session, "yend",   value = round(len))
+  }, ignoreInit = TRUE)
 
   # 8-direction pan (dx,dy in {-1,0,1}) scaled by the chosen step fraction, plus
   # a center reset to the whole chromosome. All no-ops until a map is loaded.
@@ -2506,7 +2870,8 @@ server <- function(input, output, session) {
   observeEvent(input$view_whole, {
     if (is.null(rv$chrlen)) return()
     if (!isTRUE(rv$has_hic)) { set_track_view(rv$chr, 1, rv$chrlen); return() }
-    session$sendCustomMessage("viewWhole", list(chrlen = rv$chrlen))
+    session$sendCustomMessage("viewWhole", list(
+      chrlen = rv$chrlen, chrlenY = rv$chrlen_y %||% rv$chrlen))
   })
 
   # ---- bookmarks : star the current view, jump back to it later ----
@@ -2521,7 +2886,9 @@ server <- function(input, output, session) {
     y1 <- if (isTRUE(rv$has_hic) && !is.null(v)) round(v$south)        else x1
     rv$bm_seq <- rv$bm_seq + 1L; id <- rv$bm_seq
     nm <- if (!is.null(input$bm_name) && nzchar(input$bm_name)) input$bm_name
-          else sprintf("%s:%s-%s", rv$chr, format(x0, big.mark = ","), format(x1, big.mark = ","))
+          else if (!is.null(rv$genome)) tr("region_chr_all")
+          else sprintf("%s:%s-%s", rv$chr, format(x0, big.mark = ","),
+                       format(x1, big.mark = ","))
     # a bookmark taken with a contact map on screen also remembers WHICH data
     # and how it was shown, so jumping to it can restore the whole picture
     dat <- if (isTRUE(rv$has_hic)) list(
@@ -2534,8 +2901,8 @@ server <- function(input, output, session) {
     else list(cat_id = NA, path = "", entry = "", norm = "",
               resolution = NA, vmax = NA)
     rv$bookmarks[[as.character(id)]] <- c(
-      list(id = id, name = nm, chr = rv$chr, x0 = x0, x1 = x1,
-           y0 = y0, y1 = y1, comment = ""), dat)
+      list(id = id, name = nm, chr = rv$chr, chr_y = rv$chr_y %||% rv$chr,
+           x0 = x0, x1 = x1, y0 = y0, y1 = y1, comment = ""), dat)
     updateTextInput(session, "bm_name", value = "")
   })
 
@@ -2572,7 +2939,14 @@ server <- function(input, output, session) {
       }
       return()
     }
-    if (same_data && isTRUE(rv$has_hic) && identical(b$chr, rv$chr)) {
+    # A bookmark written before inter-chromosome views existed has no Y
+    # chromosome; those were all cis, so its X chromosome is both axes.
+    bchr_y <- b$chr_y %||% NA
+    if (length(bchr_y) != 1 || is.na(bchr_y) || !nzchar(as.character(bchr_y)))
+      bchr_y <- b$chr
+    bchr_y <- as.character(bchr_y)
+    if (same_data && isTRUE(rv$has_hic) && identical(b$chr, rv$chr) &&
+        identical(bchr_y, rv$chr_y %||% rv$chr)) {
       session$sendCustomMessage("gotoView",
         list(x0 = b$x0, x1 = b$x1, y0 = b$y0, y1 = b$y1))
       return()
@@ -2582,7 +2956,7 @@ server <- function(input, output, session) {
     if (length(bsrc) > 0) rv$cat_src <- bsrc
     bres <- suppressWarnings(as.numeric(b$resolution %||% NA))
     bvmx <- suppressWarnings(as.numeric(b$vmax %||% NA))
-    do_open(src = src, chr = b$chr,
+    do_open(src = src, chr = b$chr, chr_y = bchr_y,
             start = b$x0, end = b$x1, ystart = b$y0, yend = b$y1,
             norm = if (!is.null(b$norm) && nzchar(b$norm %||% "")) b$norm else st$norm,
             vmax = if (length(bvmx) == 1 && is.finite(bvmx) && bvmx > 0) bvmx else NULL,
@@ -2660,9 +3034,16 @@ server <- function(input, output, session) {
       # a normalization vector can be missing at some zoom levels (ICE at 5 kb
       # but not at 1 kb, say), so the ladder is rebuilt on every switch.
       paths_now <- if (!is.null(st$vpaths)) st$vpaths else st$path
-      res_by  <- res_for_chr(paths_now, rv$chr, nn)
+      chry_now <- rv$chr_y %||% rv$chr
+      gen_now  <- rv$genome
+      res_by  <- if (!is.null(gen_now)) res_for_genome(paths_now, gen_now, nn)
+                 else res_for_chr(paths_now, rv$chr, nn, chry_now)
       res_all <- sort(unique(unlist(res_by)))
-      if (!length(res_all)) stop(sprintf(tr("msg_no_res"), rv$chr))
+      if (!length(res_all))
+        stop(sprintf(tr("msg_no_res"),
+                     if (!is.null(gen_now)) tr("region_chr_all")
+                     else if (isTRUE(rv$trans)) paste(rv$chr, "x", chry_now)
+                     else rv$chr))
       vmap <- NULL
       if (!is.null(st$vpaths)) {
         vmap <- list()
@@ -2671,11 +3052,14 @@ server <- function(input, output, session) {
           if (is.null(vmap[[key]])) vmap[[key]] <- paths_now[fi]
         }
       }
-      ovres  <- choose_res(rv$chrlen / 400, res_all)
+      ovres  <- choose_res(max(rv$chrlen, rv$chrlen_y %||% rv$chrlen) / 400, res_all)
       ovpath <- if (is.null(vmap)) st$path else vmap[[as.character(ovres)]]
       withProgress(message = tr("prog_norm"), value = 0.4, {
-        ov <- read_hic_map(ovpath, chr = rv$chr, start = 1, end = NA,
-                           resolution = ovres, normalization = nn)
+        # rows = Y chromosome, columns = X (see do_open)
+        ov <- if (!is.null(gen_now)) read_genome_map(ovpath, gen_now, ovres, nn)
+              else read_hic_map(ovpath, chr = chry_now, start = 1, end = NA,
+                                resolution = ovres, normalization = nn,
+                                chr2 = rv$chr, start2 = 1, end2 = NA)
       })
       st$path <- ovpath; st$res <- res_all; st$vmap <- vmap
       st$vres_by <- if (is.null(vmap)) NULL else res_by
@@ -2688,14 +3072,24 @@ server <- function(input, output, session) {
       # fixed resolution (same guard as on Open).
       rv$res_prog <- TRUE
       rv$res_all <- res_all; rv$ov_res <- ovres
+      # st$ovres is the reference bin size the colour scale is expressed in:
+      # every tile scales st$vmin/st$vmax by (res/st$ovres)^2, and st$vmax is
+      # recomputed below from THIS overview. Leaving it at the old value would
+      # scale every tile by the wrong factor when a normalization switch lands
+      # on a different overview resolution (and the export, which uses the same
+      # formula, with it).
+      st$ovres <- ovres
       # virtual dataset: the cross-file brightness factors are sums under the
       # active normalization, so they must be recomputed for the new one
       if (!is.null(st$vpaths))
-        st$vfac <- compute_vfac(st$vpaths, res_by, rv$chr, nn, st$path)
+        st$vfac <- if (!is.null(gen_now))
+          compute_vfac(st$vpaths, res_by, gen_now$name[1], nn, st$path,
+                       gen_now$name[1])
+        else compute_vfac(st$vpaths, res_by, rv$chr, nn, st$path, chry_now)
       st$norm <- nn
       rv$ov <- ov
       vals <- as.numeric(ov); vals <- vals[is.finite(vals)]
-      p99  <- sort(vals)[max(1, round(length(vals) * 0.99))]
+      p99  <- auto_vmax(vals)
       rv$restore_vmax <- NULL
       rv$dmin <- min(vals); rv$dmax <- max(vals)
       pos <- vals[vals > 0]; rv$dfloor <- if (length(pos)) min(pos) else 1
@@ -2719,21 +3113,23 @@ server <- function(input, output, session) {
       message(sprintf("[norm] %s chr=%s res=%s baseRes=%s->%s", nn, rv$chr,
                       paste(res_all, collapse = "/"), rv$baseRes, min(res_all)))
       if (!isTRUE(all.equal(min(res_all), rv$baseRes))) {
+        leny    <- rv$chrlen_y %||% rv$chrlen
         baseRes <- min(res_all)
-        Nfine   <- ceiling(rv$chrlen / baseRes)
+        Nfine   <- ceiling(max(rv$chrlen, leny) / baseRes)
         maxZoom <- max(1, ceiling(log2(Nfine / TILE_PX)))
         SCALE   <- baseRes * 2^maxZoom
         rv$scale <- SCALE; rv$baseRes <- baseRes; rv$maxZoom <- maxZoom
         st$baseRes <- baseRes; st$maxZoom <- maxZoom; st$blank <- NULL
         v <- input$map_view
         session$sendCustomMessage("initTiles", list(
-          url = register_tiles(), scale = SCALE, U = rv$chrlen / SCALE,
+          url = register_tiles(), scale = SCALE,
+          U = rv$chrlen / SCALE, Uy = leny / SCALE,
           maxZoom = maxZoom, mapMaxZoom = maxZoom + 6,
-          ver = as.numeric(Sys.time()), chrlen = rv$chrlen,
+          ver = as.numeric(Sys.time()), chrlen = rv$chrlen, chrlenY = leny,
           fx0 = if (is.null(v)) 1 else max(1, v$west),
           fy0 = if (is.null(v)) 1 else max(1, v$north),
           fx1 = if (is.null(v)) rv$chrlen else min(rv$chrlen, v$east),
-          fy1 = if (is.null(v)) rv$chrlen else min(rv$chrlen, v$south)))
+          fy1 = if (is.null(v)) leny else min(leny, v$south)))
       } else {
         session$sendCustomMessage("redrawTiles", list(ver = as.numeric(Sys.time())))
       }
@@ -2859,16 +3255,29 @@ server <- function(input, output, session) {
         !is.null(rv$sample_name_b))
       nameLab <- paste0(trimws(nameLab, "right"),
                         sprintf(tr("coord_cmp"), rv$sample_name_b), "   ")
+    # A genome-wide view is in global bp, which means nothing to a reader:
+    # show where each edge falls as chromosome + position within it.
+    if (!is.null(rv$genome)) {
+      g <- rv$genome
+      e <- function(bp) {
+        l <- gen_label(g, max(0, min(g$total - 1, bp)))
+        sprintf("%s:%s", l$chr, f(l$pos))
+      }
+      return(paste0(nameLab,
+        sprintf(tr("coord_view_genome"), e(v$west), e(v$east),
+                e(v$north), e(v$south), resLab)))
+    }
     paste0(nameLab,
            sprintf(tr("coord_view"), rv$chr, f(v$west), f(v$east),
-                   rv$chr, f(v$north), f(v$south), resLab))
+                   rv$chr_y %||% rv$chr, f(v$north), f(v$south), resLab))
   })
 
   # hover readout (score sampled from the coarse overview; distance is exact)
   output$hover <- renderText({
     h <- input$hover
     if (is.null(h) || is.null(rv$ov) || is.null(rv$chrlen)) return("")
-    if (h$x < 1 || h$y < 1 || h$x > rv$chrlen || h$y > rv$chrlen) return(tr("hover_outside"))
+    leny <- rv$chrlen_y %||% rv$chrlen
+    if (h$x < 1 || h$y < 1 || h$x > rv$chrlen || h$y > leny) return(tr("hover_outside"))
     r <- rv$ov_res; nr <- nrow(rv$ov); nc <- ncol(rv$ov)
     ix <- min(nc, floor((h$x - 1) / r) + 1); iy <- min(nr, floor((h$y - 1) / r) + 1)
     score <- rv$ov[iy, ix]
@@ -2876,8 +3285,26 @@ server <- function(input, output, session) {
     g <- function(z) if (is.null(z) || length(z) != 1 || is.na(z)) "NA"
                      else formatC(z, format = "g", digits = 4)
     sc <- g(score)
-    line <- sprintf(tr("hover_line"),
-                    rv$chr, f(h$x), rv$chr, f(h$y), sc, f(abs(h$x - h$y)))
+    chry <- rv$chr_y %||% rv$chr
+    # Genome-wide: name the chromosome each axis is over, and give the distance
+    # only when the cursor is on a pair of loci from the SAME chromosome.
+    if (!is.null(rv$genome)) {
+      g  <- rv$genome
+      lx <- gen_label(g, h$x); ly <- gen_label(g, h$y)
+      if (!nzchar(lx$chr) || !nzchar(ly$chr)) return(tr("hover_outside"))
+      return(if (identical(lx$chr, ly$chr))
+        sprintf(tr("hover_line"), lx$chr, f(lx$pos), ly$chr, f(ly$pos), sc,
+                f(abs(lx$pos - ly$pos)))
+      else
+        sprintf(tr("hover_line_trans"), lx$chr, f(lx$pos), ly$chr, f(ly$pos), sc))
+    }
+    # The separation between the two loci is only meaningful within one
+    # chromosome; across two it has no meaning at all, so it is left out.
+    line <- if (isTRUE(rv$trans))
+      sprintf(tr("hover_line_trans"), rv$chr, f(h$x), chry, f(h$y), sc)
+    else
+      sprintf(tr("hover_line"), rv$chr, f(h$x), chry, f(h$y), sc,
+              f(abs(h$x - h$y)))
     # With a comparison sample loaded, always report BOTH samples for this locus
     # pair plus their log2 ratio — the split view alone only shows one of them
     # at any given pixel. B is depth-corrected so the two numbers are comparable.
@@ -2977,6 +3404,13 @@ server <- function(input, output, session) {
 
   output$tracks_ui <- renderUI({
     if (length(rv$tracks) == 0) return(NULL)
+    # A genome-wide map has every chromosome on its x axis, so a track - which
+    # is drawn along ONE chromosome's coordinates - has nothing to line up
+    # with. The tracks stay loaded and come back as soon as a chromosome is
+    # chosen again; only the drawing is suspended.
+    if (!is.null(rv$genome))
+      return(div(style = "padding:6px 2px; color:#777; font-size:12px;",
+                 tr("trk_hidden_genome")))
     # track-only mode: prepend an x-coordinate ruler (the contact map brings
     # its own). Dragging on it zooms to the brushed region.
     ruler <- if (!isTRUE(rv$has_hic))
@@ -3043,6 +3477,24 @@ server <- function(input, output, session) {
                  else if (!is.null(rv$chrlen)) min(rv$chrlen, input$end) else input$end
     if (!is.finite(cur_end) || cur_end <= cur_start)
       cur_end <- if (!is.null(rv$chrlen)) rv$chrlen else cur_start + 1e6
+    # vertical axis: on a trans map it is a different chromosome with its own
+    # range, taken from the view exactly as the horizontal one is
+    mv <- if (isTRUE(rv$has_hic)) input$map_view else NULL
+    cur_chr_y  <- rv$chr_y %||% cur_chr
+    cur_ystart <- if (!is.null(mv)) max(1, round(mv$north)) else cur_start
+    cur_yend   <- if (!is.null(mv)) round(mv$south)         else cur_end
+    if (!is.finite(cur_yend) || cur_yend <= cur_ystart) {
+      cur_ystart <- 1
+      cur_yend   <- rv$chrlen_y %||% rv$chrlen %||% (cur_ystart + 1e6)
+    }
+    # a genome-wide map covers everything, so the region controls are replaced
+    # by a note and the export always spans the whole genome
+    gen_now <- rv$genome
+    if (!is.null(gen_now)) {
+      cur_chr <- gen_now$name[1]
+      cur_start <- 1; cur_end <- gen_now$total
+      cur_ystart <- 1; cur_yend <- gen_now$total
+    }
     chr_choices <- if (!is.null(st$path)) {
       tryCatch({
         info <- hic_chroms(st$path)
@@ -3060,7 +3512,8 @@ server <- function(input, output, session) {
       fluidRow(
         column(7,
           tags$div(style = "border:1px solid #ddd; padding:4px; background:#fff;",
-            uiOutput("exp_preview_ui"))),
+            uiOutput("exp_preview_ui")),
+          tags$small(style = "color:#666;", textOutput("exp_info", inline = TRUE))),
         column(5,
           radioButtons("exp_dest", tr("print_dest"),
                        setNames(c("printer", "file"),
@@ -3093,14 +3546,41 @@ server <- function(input, output, session) {
             column(6, numericInput("exp_w", tr("print_width"), 210, min = 10, step = 5)),
             column(6, numericInput("exp_h", tr("print_height"), 297, min = 10, step = 5))),
           tags$hr(style = "margin:8px 0;"),
-          tags$b(tr("print_region")), tags$small(tr("print_region_note")),
+          tags$b(tr("print_region")),
+          if (is.null(gen_now)) tags$small(tr("print_region_note"))
+          else tags$small(tr("print_genome_note")),
+          conditionalPanel(
+            if (is.null(gen_now)) "true" else "false",
           selectInput("exp_chr", tr("print_chr"), chr_choices, selected = cur_chr),
           fluidRow(
             column(6, numericInput("exp_start", tr("print_start"), round(cur_start), min = 1)),
             column(6, numericInput("exp_end", tr("print_end"), round(cur_end), min = 1))),
+          # vertical axis: "same as X" keeps the familiar square export
+          selectInput("exp_chr_y", tr("print_chr_y"),
+                      setNames(c("", chr_choices), c(tr("region_chr_same"), chr_choices)),
+                      selected = if (isTRUE(rv$trans)) cur_chr_y else ""),
+          conditionalPanel("input.exp_chr_y != ''",
+            fluidRow(
+              column(6, numericInput("exp_ystart", tr("print_y_start"),
+                                     round(cur_ystart), min = 1)),
+              column(6, numericInput("exp_yend", tr("print_y_end"),
+                                     round(cur_yend), min = 1))))),
+          # Resolution. "Same as the map" is the default so the printed figure
+          # is built from the same bins as the picture on screen - including a
+          # resolution pinned in Display > Map, which the export used to ignore.
+          selectInput("exp_res", tr("print_res"),
+                      c(setNames("", tr("print_res_same")),
+                        setNames(as.character(rv$res_all %||% numeric(0)),
+                                 vapply(rv$res_all %||% numeric(0), fmt_res,
+                                        character(1)))),
+                      selected = ""),
           tags$hr(style = "margin:8px 0;"),
           checkboxInput("exp_ticks", tr("print_ticks"), TRUE),
           checkboxInput("exp_legend", tr("print_legend"), TRUE),
+          # equal bp per mm on both axes - without it the map is stretched to
+          # whatever shape the paper leaves it, which distorts any region whose
+          # two axes span different numbers of bp
+          checkboxInput("exp_equal", tr("print_equal"), TRUE),
           checkboxInput("exp_nomargin", tr("print_nomargin"), FALSE),
           if (length(rv$tracks) > 0)
             checkboxInput("exp_tracks", tr("print_export_trk"), TRUE),
@@ -3133,24 +3613,79 @@ server <- function(input, output, session) {
 
   # region matrix for export: re-read only when chr/start/end change (key-guarded)
   export_mat <- reactive({
-    req(input$exp_chr, input$exp_start, input$exp_end)
+    if (is.null(rv$genome)) req(input$exp_chr, input$exp_start, input$exp_end)
     if (is.null(st$path)) return(NULL)     # track-only export: no matrix
-    s <- max(1, as.numeric(input$exp_start)); e <- as.numeric(input$exp_end)
+    xx <- exp_x_region()
+    s <- max(1, as.numeric(xx$start)); e <- as.numeric(xx$end)
     if (!is.finite(s) || !is.finite(e) || e <= s) return(NULL)
+    yy <- exp_y_region()
+    er <- exp_resolution()
+    gn <- rv$genome
     # the comparison sample and its depth factor change the matrix too, so they
     # belong in the cache key
-    key <- paste(st$path, input$exp_chr, s, e, st$norm,
+    key <- paste(st$path, input$exp_chr, s, e, yy$chr, yy$start, yy$end, st$norm,
+                 er %||% "auto", if (is.null(gn)) "" else "genome",
                  st$path2 %||% "", st$norm2 %||% "",
                  st$cmpMode %||% "single", st$bfac %||% 1,
                  st$diffType %||% "", st$diffEps %||% "")
     if (!identical(rv$exp_key, key)) {
       rv$exp_data <- tryCatch(
-        read_export_matrix(st, input$exp_chr, s, e),
+        read_export_matrix(st, xx$chr, s, e,
+                           chr_y = yy$chr, ystart = yy$start, yend = yy$end,
+                           resolution = er),
         error = function(err) { rv$exp_msg <- sprintf(tr("print_read_err"), conditionMessage(err)); NULL })
       rv$exp_key <- key
     }
     rv$exp_data
   })
+
+  # The export's vertical axis: the Y controls when one is chosen, otherwise
+  # the horizontal range on the horizontal chromosome (the square cis export
+  # this dialog has always produced).
+  # The export's horizontal axis: the whole genome in a genome-wide view,
+  # otherwise whatever the dialog's chromosome/range boxes say.
+  exp_x_region <- function() {
+    if (!is.null(rv$genome))
+      return(list(chr = rv$genome$name[1], start = 1, end = rv$genome$total))
+    list(chr = input$exp_chr, start = input$exp_start, end = input$exp_end)
+  }
+
+  exp_y_region <- function() {
+    # a genome-wide export always spans the whole genome on both axes
+    if (!is.null(rv$genome))
+      return(list(chr = rv$genome$name[1], start = 1, end = rv$genome$total))
+    cy <- input$exp_chr_y
+    s  <- max(1, suppressWarnings(as.numeric(input$exp_start)))
+    e  <- suppressWarnings(as.numeric(input$exp_end))
+    if (is.null(cy) || !nzchar(cy))
+      return(list(chr = input$exp_chr, start = s, end = e))
+    ys <- suppressWarnings(as.numeric(input$exp_ystart))
+    ye <- suppressWarnings(as.numeric(input$exp_yend))
+    if (!is.finite(ys) || ys < 1) ys <- 1
+    if (!is.finite(ye) || ye <= ys) ye <- chrom_len_of(cy) %||% (ys + 1e6)
+    list(chr = cy, start = ys, end = ye)
+  }
+
+  # The bin size the export should read at: an explicit choice from the print
+  # dialog, otherwise whatever the map on screen is currently drawing with.
+  exp_resolution <- function() {
+    v <- suppressWarnings(as.numeric(input$exp_res %||% ""))
+    if (length(v) == 1 && is.finite(v) && v > 0) v else current_map_res()
+  }
+
+  # The bin size the contact map on screen is drawing with right now: the
+  # pinned one in fixed mode, otherwise the one the current zoom selects (the
+  # same choice render_tile() makes). NULL when no map is open.
+  current_map_res <- function() {
+    if (is.null(rv$res_all) || !length(rv$res_all)) return(NULL)
+    if (isFALSE(input$map_res_auto) && !is.null(st$fixedRes))
+      return(rv$res_all[which.min(abs(rv$res_all - st$fixedRes))])
+    v <- input$map_view
+    if (is.null(v) || is.null(v$zoom) || is.null(rv$baseRes)) return(NULL)
+    nz  <- max(0, min(round(v$zoom), rv$maxZoom))
+    bpp <- rv$baseRes * 2^(rv$maxZoom - nz)
+    choose_res(bpp, rv$res_all)
+  }
 
   # scaled colour bounds so the export matches the on-screen tiles (which scale
   # the global vmin/vmax by (res/ovres)^2 for the tile's resolution).
@@ -3228,15 +3763,35 @@ server <- function(input, output, session) {
     d <- export_mat()
     if (is.null(d)) req(is.null(st$path))      # no map: tracks-only preview
     b <- if (is.null(d)) list(vmin = 0, vmax = 1) else exp_bounds(d$res, d$diff)
-    s <- max(1, as.numeric(input$exp_start)); e <- as.numeric(input$exp_end)
+    gx <- exp_x_region()
+    s <- max(1, as.numeric(gx$start)); e <- as.numeric(gx$end)
+    yy <- exp_y_region()
     do.call(draw_export_map, c(list(
       if (is.null(d)) NULL else d$m,
-      input$exp_chr, input$exp_start, input$exp_end,
+      gx$chr, gx$start, gx$end,
       color = exp_palette(d), vmin = b$vmin, vmax = b$vmax,
       ticks = isTRUE(input$exp_ticks), legend = isTRUE(input$exp_legend),
       no_margin = isTRUE(input$exp_nomargin),
       tracks = build_export_tracks(s, e),
-      map_weight = input$map_height %||% 720), export_split_args(d)))
+      map_weight = input$map_height %||% 720,
+      chr_y = yy$chr, ystart = yy$start, yend = yy$end,
+      equal_scale = isTRUE(input$exp_equal),
+      genome = rv$genome), export_split_args(d)))
+  })
+
+  # What the export is actually drawing: the bin size it read at, and how that
+  # compares with the resolution the map on screen is using. They are picked
+  # independently (the map from its zoom, the export from the region size), and
+  # when they differ the two pictures are built from different bins - which is
+  # the usual reason a print looks brighter or flatter than the screen.
+  output$exp_info <- renderText({
+    d <- export_mat()
+    if (is.null(d)) return("")
+    scr <- current_map_res()
+    paste0(sprintf(tr("print_info_res"), fmt_res(d$res),
+                   nrow(d$m), ncol(d$m)),
+           if (!is.null(scr) && !isTRUE(all.equal(scr, d$res)))
+             sprintf(tr("print_info_res_diff"), fmt_res(scr)) else "")
   })
 
   output$exp_status <- renderText(rv$exp_msg)
@@ -3246,20 +3801,26 @@ server <- function(input, output, session) {
     # d == NULL is normal when no .hic is loaded (tracks-only export)
     if (is.null(d) && !is.null(st$path)) { rv$exp_msg <- tr("print_check_region"); return() }
     b <- if (is.null(d)) list(vmin = 0, vmax = 1) else exp_bounds(d$res, d$diff)
-    s <- max(1, as.numeric(input$exp_start)); e <- as.numeric(input$exp_end)
-    exp_tracks <- build_export_tracks(s, e)
+    gxr <- exp_x_region()
+    s <- max(1, as.numeric(gxr$start)); e <- as.numeric(gxr$end)
+    exp_tracks <- if (is.null(rv$genome)) build_export_tracks(s, e) else list()
     if (is.null(d) && length(exp_tracks) == 0) { rv$exp_msg <- tr("print_need_data"); return() }
     mapw <- input$map_height %||% 720
     split_args <- export_split_args(d)
     pal <- exp_palette(d)
+    yy  <- exp_y_region()
+    gx  <- gxr
     draw_fn <- function()
       do.call(draw_export_map, c(list(
         if (is.null(d)) NULL else d$m,
-        input$exp_chr, input$exp_start, input$exp_end,
+        gx$chr, gx$start, gx$end,
         color = pal, vmin = b$vmin, vmax = b$vmax,
         ticks = isTRUE(input$exp_ticks), legend = isTRUE(input$exp_legend),
         no_margin = isTRUE(input$exp_nomargin),
-        tracks = exp_tracks, map_weight = mapw), split_args))
+        tracks = exp_tracks, map_weight = mapw,
+        chr_y = yy$chr, ystart = yy$start, yend = yy$end,
+        equal_scale = isTRUE(input$exp_equal),
+        genome = rv$genome), split_args))
     W <- input$exp_w %||% 210; H <- input$exp_h %||% 297
 
     if (identical(input$exp_dest, "printer")) {
