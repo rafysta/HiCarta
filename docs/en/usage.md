@@ -8,21 +8,21 @@ To start with, the overall flow is all you need to remember: **load data → ope
 
 ## Loading data
 
-Data is loaded from the loader that opens when you click the **Data** button at the top of the screen (three tabs: "Hi-C", "Tracks" and "Session").
+All data is loaded from the **[data catalog](data-catalog.md)** — an Excel file listing your samples, one row each — in the loader that opens when you click the **Data** button at the top of the screen (two tabs: "Data browser" and "Session").
 
 ### Load a Hi-C map {#load-hic}
 
 1. Click the **Data** button at the top.
-2. On the **Hi-C** tab, click **Load menu** and choose a sample and dataset, or enter the path of a `.hic` file on your computer in **local .hic file** (**Browse…** also works).
-3. Click **Open map**.
+2. On the **Data browser** tab, load your catalog (**Load**; the field is pre-filled from `config.txt`, and **Browse…** picks a local `.xlsx`).
+3. Narrow the list with the sidebar filters or search, and click the sample's row.
+4. In the detail view, click **Open as contact map**.
 
-→ Details: [Screens & controls - Data](interface.md#data)
+→ Details: [Screens & controls - Data](interface.md#data), [Data catalog](data-catalog.md)
 
 ### Load a bigWig {#load-bigwig}
 
-1. Open the **Data** button → **Tracks** tab.
-2. Enter the bigWig path or URL in **bigWig/BED file/URL** (**Browse…** also works).
-3. Set **Type** to "bigWig" and click **Add track**.
+1. In the **Data browser**, click the row of a bigWig sample.
+2. Click **Add as track**, adjust label / color / height in the dialog, and confirm.
 
 If a Hi-C map is already open, the track is drawn on the map's coordinates.
 
@@ -44,19 +44,11 @@ first chromosome; the contact map stays hidden.
 - Open a Hi-C map later and the contact map appears, synced to the tracks as usual.
 - **Print** works for tracks alone (a coordinate axis plus the tracks).
 
-### Load Border Strength {#load-bs}
+### Load Border Strength / genes / BED {#load-bs}
 
-1. Open the **Data** button → **Tracks** tab.
-2. Enter the path or URL of the Border Strength file (`*_BS.txt`) in the file field.
-3. Set **Type** to "Border Strength" and click **Add track**.
+Like any other track: give the file a catalog row (with `file_type` = `bs`, `gff3` or `bed`, or just let the extension decide), click the row in the **Data browser**, and choose **Add as track**.
 
-Positive values are drawn in red, negative values in blue, and boundaries are marked with dashed lines. For the file format, see **[Data formats](data-formats.md)**.
-
-→ Details: [Screens & controls - Tracks](interface.md#tracks)
-
-### Load genes / BED {#load-other}
-
-On the **Tracks** tab, enter a path or URL in the file field, set **Type** to "gene (GFF3)" or "BED", and click **Add track**. If an IGV XML or track list is available, you can also add tracks via **Load** at the top, choosing XML file → Category → Track.
+Border Strength (`*_BS.txt`): positive values are drawn in red, negative values in blue, and boundaries are marked with dashed lines. For the file formats, see **[Data formats](data-formats.md)**.
 
 → Details: [Screens & controls - Tracks](interface.md#tracks)
 
@@ -94,7 +86,7 @@ Click the button in the center of the direction pad (⌂) in the **Navigate** me
 2. If you like, enter a name in the name field at the bottom of the **Navigate** menu (optional).
 3. Click **★ Bookmark this view**.
 
-Saved bookmarks appear in a list; click one to return to that view at any time. Remove one you no longer need with **Delete**.
+Saved bookmarks appear in a list; click one to return to that view at any time — the bookmark also remembers which data was open (and its normalization, resolution and color max), so the whole picture is restored. Remove one you no longer need with **Delete**. **Save to Excel** / **Load from Excel (append)** exchange the list as an `.xlsx` you can annotate and share ([details](data-catalog.md#bookmarks-as-excel)).
 
 ![](../images/bookmark.png)
 

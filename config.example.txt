@@ -16,16 +16,11 @@
 # in Japanese. Extra languages can be added in R/i18n.R.
 #language = en
 
-# Default Juicer menu (Hi-C .hic list) shown in the Data panel.
-# Accepts a URL or a local path to a juicer menu file
-# ("id = parent, label[, url]", root rows = samples).
-# A public S. pombe test menu is noted in sample/README.md.
-#menu_url = https://example.com/path/to/juicer_menu.txt
-
-# Default track list shown in the Tracks panel.
-# May be a single IGV XML, or an index file listing several IGV XML URLs
-# (one per line).
-#track_list_url = https://example.com/path/to/igv_data.txt
+# Default data catalog (.xlsx) shown in the Data panel: a URL or a local path.
+# One catalog row = one sample. Required columns: id, name, path.
+# See docs/ (data catalog page) for the full column spec, and
+# HiCarta_catalog_template.xlsx for a ready-to-copy template.
+#catalog_url = https://example.com/path/to/catalog.xlsx
 
 # How remote files are read -- both .hic contact maps and bigWig tracks.
 # Also selectable in the in-app settings dialog.
@@ -41,3 +36,11 @@
 # BED, GFF3 and Border Strength tracks are always parsed whole and so are always
 # downloaded, whatever this is set to.
 #hic_engine = native
+
+# Genome id sent along with "Open in IGV" requests (View > data browser >
+# sample details > "Open in IGV"). IGV must already be running with its remote
+# port enabled (View > Preferences > Advanced > "Enable port", default 60151).
+# Use an IGV genome id such as hg38 / mm10 / sacCer3, or the path/URL of a
+# custom .json/.genome file registered in IGV. Leave unset to let IGV keep
+# whatever genome is currently loaded.
+#igv_genome = hg38

@@ -7,7 +7,10 @@ need <- c("shiny", "data.table", "RColorBrewer",
           "leaflet", "htmlwidgets", "base64enc",   # leaflet* = tiled viewer
           "jsonlite",                              # session save/restore (.json)
           "curl",                                  # HTTP range reads for remote .hic
-          "shinyFiles")                            # local .hic file picker dialog
+          "shinyFiles",                            # local file picker dialogs
+          "readxl",                                # Excel data catalog (.xlsx)
+          "writexl",                               # bookmark / catalog .xlsx export
+          "DT")                                    # catalog sample table
 for (p in need) {
   if (!requireNamespace(p, quietly = TRUE)) {
     message("Installing ", p, " …")

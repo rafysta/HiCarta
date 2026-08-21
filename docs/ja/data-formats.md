@@ -4,10 +4,10 @@ HiCarta はいくつかの形式を読み込みます。コンタクトマップ
 
 ## コンタクトマップ: `.hic`（Juicer）
 
-主要な形式です。HiCarta は `strawr` で領域を直接読み込みます（ランダムアクセス、マルチ解像度）。メニュー（`menu_url`）から、または Data パネルの**ローカル `.hic` ファイル**として読み込みます。
+主要な形式です。HiCarta は領域を直接読み込みます（ランダムアクセス、マルチ解像度。リモートファイルは HTTP レンジリクエストでストリーミング）。`.hic` は **[データカタログ](data-catalog.md)** から開きます。
 
 - 染色体名は `.hic` 内部の名前と一致している必要があります（例: *S. pombe* では `I / II / III`）。
-- メニューの各 `.hic` は単一解像度の場合があります。HiCarta は要求された解像度／正規化を、ファイルが持つものに合わせて調整します。
+- `.hic` は単一解像度の場合があります。HiCarta は要求された解像度／正規化を、ファイルが持つものに合わせて調整します。同じサンプルの単一解像度ファイルを 1 つのカタログ行にまとめると、仮想マルチ解像度データセットとして束ねて開けます。
 
 ## トラック
 
@@ -47,4 +47,4 @@ JUICER=/path/to/juicer_tools.jar \
 
 内部では、(1) ビン定義から `chrom.sizes` を導出し、(2) 各 200 bp ビンインデックスをその**中点**に対応付け、(3) Juicer の「short with score」レコード（`<str1> <chr1> <pos1> <frag1> <str2> <chr2> <pos2> <frag2> <score>`）を書き出し、(4) `juicer_tools pre -n`（正規化なし）を実行してマルチ解像度の `.hic` を構築します。
 
-変換後、**Data → ローカル `.hic` ファイル**から `output.hic` を開きます。[scripts/README.md](https://github.com/rafysta/HiCarta/blob/main/scripts/README.md) も参照してください。
+変換後、`output.hic` にデータカタログの行を作り、**Data browser** から開きます。[scripts/README.md](https://github.com/rafysta/HiCarta/blob/main/scripts/README.md) も参照してください。

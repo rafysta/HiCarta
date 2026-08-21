@@ -34,7 +34,7 @@ if [ -n "$PIDS" ]; then
 fi
 
 # --- first run: install packages if anything is missing -------------------
-"$RSCRIPT" -e "pkgs<-c('shiny','leaflet','htmlwidgets','base64enc','data.table','RColorBrewer','strawr','rtracklayer'); if(!all(sapply(pkgs,requireNamespace,quietly=TRUE))) quit(status=10)"
+"$RSCRIPT" -e "pkgs<-c('shiny','leaflet','htmlwidgets','base64enc','data.table','RColorBrewer','shinyFiles','readxl','writexl','DT','strawr','rtracklayer'); if(!all(sapply(pkgs,requireNamespace,quietly=TRUE))) quit(status=10)"
 if [ $? -eq 10 ]; then
   echo "Installing required R packages (first run only)..."
   "$RSCRIPT" "R/install_libraries.R"

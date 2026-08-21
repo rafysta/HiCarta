@@ -7,7 +7,7 @@ REM ==========================================================================
 setlocal
 set "PORT=7788"
 set "APPDIR=%~dp0"
-set "PKGS=c('shiny','leaflet','htmlwidgets','base64enc','data.table','RColorBrewer','jsonlite','shinyFiles','strawr','rtracklayer')"
+set "PKGS=c('shiny','leaflet','htmlwidgets','base64enc','data.table','RColorBrewer','jsonlite','shinyFiles','readxl','writexl','DT','strawr','rtracklayer')"
 
 REM --- guard: CMD cannot use a UNC path as the current directory ------------
 REM     e.g. \\wsl.localhost\Ubuntu\home\you\HiCarta or \\server\share\HiCarta

@@ -232,3 +232,51 @@ plot_track <- function(spec, chr, vstart, vend, chrlen = Inf, nbins = 1000,
   }
   if (isTRUE(frame)) box(col = "grey85")
 }
+
+# ---------------------------------------------------------------------------
+# plot_ruler(): thin x-coordinate scale drawn ABOVE the tracks when no contact
+# map (which has its own Leaflet ruler) is on screen. Zero left/right margins
+# and the same xlim/xaxs as plot_track(), so its ticks line up with the tracks
+# below. It is drawn in real genomic coordinates, so a Shiny brush on this
+# plot reports bp positions directly (used for drag-to-zoom).
+# ---------------------------------------------------------------------------
+plot_ruler <- function(chr, vstart, vend, chrlen = Inf,
+                       mar = c(0, 0, 0, 0)) {
+  op <- par(mar = mar); on.exit(par(op))
+  plot(NA, xlim = c(vstart, vend), ylim = c(0, 1),
+       xaxs = "i", yaxs = "i", axes = FALSE, ann = FALSE)
+  rng <- vend - vstart
+  if (!is.finite(rng) || rng <= 0) return(invisible(NULL))
+  rect(vstart, 0, vend, 1, col = "grey96", border = NA)
+  segments(vstart, 0.04, vend, 0.04, col = "grey55")
+
+  nice_step <- function(r, n) {
+    raw <- r / n; mag <- 10^floor(log10(raw)); q <- raw / mag
+    s <- if (q < 1.5) 1 else if (q < 3) 2 else if (q < 7) 5 else 10
+    s * mag
+  }
+  fmtbp <- function(v) {
+    v <- round(v)
+    if (abs(v) >= 1e6) sprintf("%.2f Mb", v / 1e6)
+    else if (abs(v) >= 1e3) sprintf("%.0f kb", v / 1e3)
+    else sprintf("%d bp", v)
+  }
+  Wpx  <- tryCatch(grDevices::dev.size("px")[1], error = function(e) 800)
+  nlab <- max(3, min(10, floor(Wpx / 150)))
+  s    <- nice_step(rng, nlab); sub <- s / 5
+  at   <- seq(ceiling(vstart / sub) * sub, vend, by = sub)
+  if (length(at)) {
+    maj <- abs(at / s - round(at / s)) < 1e-6
+    segments(at, 0.04, at, ifelse(maj, 0.45, 0.24),
+             col = ifelse(maj, "grey25", "grey60"))
+    gutfrac <- (66 + 8) / Wpx            # keep labels left of the y-ruler gutter
+    ok <- maj & at <= vstart + (1 - gutfrac) * rng & at >= vstart + 0.03 * rng
+    if (any(ok))
+      text(at[ok], 0.55, vapply(at[ok], fmtbp, character(1)),
+           adj = c(0.5, 0), cex = 0.95, col = "grey15")
+  }
+  # chromosome name pinned to the left edge
+  text(vstart + 0.004 * rng, 0.55, chr, adj = c(0, 0),
+       cex = 1.05, font = 2, col = "grey10")
+  invisible(NULL)
+}

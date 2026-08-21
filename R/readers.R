@@ -199,6 +199,23 @@ hic_resolutions <- function(path) {
   sort(strawr::readHicBpResolutions(path))
 }
 
+# Resolutions usable for ONE chromosome with ONE normalization.
+#
+# hic_resolutions() answers from the file header, which is global: a given
+# chromosome's matrix can carry fewer zoom levels than the header advertises,
+# and a normalization vector can be missing at some of them. Reading at such a
+# resolution fails, and in the viewer that is a blank map at the deepest zoom -
+# so the zoom ladder must be built from THIS list. Header list as a fallback
+# (strawr engine, odd files); never returns empty when the header has something.
+hic_resolutions_chr <- function(path, chr, normalization = "NONE", chr2 = chr) {
+  if (.hic_native()) {
+    r <- tryCatch(hic_chr_resolutions(hic_reader(path), chr, chr2, normalization),
+                  error = function(e) NULL)
+    if (length(r)) return(sort(r))
+  }
+  tryCatch(hic_resolutions(path), error = function(e) numeric(0))
+}
+
 hic_norms <- function(path) {
   if (.hic_native()) {
     r <- tryCatch(hic_meta(hic_reader(path))$norms, error = function(e) NULL)
@@ -244,12 +261,13 @@ read_hic_map <- function(path, chr, start = 1, end = NA, resolution = 10000,
   #  resolution yields "Error finding block data".)
   # These lookups are cached per file by the native reader, so unlike the old
   # strawr calls they cost nothing after the first tile.
-  avail_res <- tryCatch(hic_resolutions(path), error = function(e) NULL)
-  if (!is.null(avail_res) && length(avail_res) && !(resolution %in% avail_res)) {
-    resolution <- avail_res[which.min(abs(avail_res - resolution))]
-  }
   avail_norm <- tryCatch(hic_norms(path), error = function(e) "NONE")
   if (!(normalization %in% avail_norm)) normalization <- "NONE"
+  # Snap to a resolution that exists for THIS chromosome pair under THIS
+  # normalization (the header's list is file-global, see hic_resolutions_chr).
+  avail_res <- hic_resolutions_chr(path, chr, normalization, chr2)
+  if (length(avail_res) && !(resolution %in% avail_res))
+    resolution <- avail_res[which.min(abs(avail_res - resolution))]
 
   d <- .hic_query(path, chr, start, end, chr2, start2, end2,
                   resolution, normalization, unit)

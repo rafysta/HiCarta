@@ -5,14 +5,16 @@ a 1‑D track.
 
 ## Contact maps: `.hic` (Juicer)
 
-The primary format. HiCarta reads regions directly with `strawr` (random access,
-multi‑resolution). Load either from the menu (`menu_url`) or as a **local `.hic`
-file** in the Data panel.
+The primary format. HiCarta reads regions directly (random access,
+multi‑resolution; remote files are streamed over HTTP range requests). `.hic`
+files are opened from the **[data catalog](data-catalog.md)**.
 
 - Chromosome names must match those inside the `.hic` (e.g. `I / II / III` for
   *S. pombe*).
-- Each menu `.hic` may be single‑resolution; HiCarta snaps the requested
-  resolution/normalization to what the file contains.
+- A `.hic` may be single‑resolution; HiCarta snaps the requested
+  resolution/normalization to what the file contains. Several single‑resolution
+  files of one sample can share a catalog row and be opened together as a
+  virtual multi‑resolution dataset.
 
 ## Tracks
 
@@ -64,5 +66,6 @@ Under the hood it (1) derives `chrom.sizes` from the bin definition, (2) maps ea
 (4) runs `juicer_tools pre -n` (no normalization) to build the multi‑resolution
 `.hic`.
 
-After conversion, open `output.hic` via **Data → local `.hic` file**. See also
+After conversion, give `output.hic` a row in your data catalog and open it from
+the **Data browser**. See also
 [scripts/README.md](https://github.com/rafysta/HiCarta/blob/main/scripts/README.md).

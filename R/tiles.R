@@ -32,15 +32,42 @@
 # Sequencing-depth differences are corrected by multiplying B's values by
 # `st$bfac` (computed once from the two overview matrices; see do_open_b()).
 #
+# VIRTUAL MULTI-RESOLUTION DATASET
+# --------------------------------
+# Several single-resolution .hic files (e.g. one ICE-normalized file per
+# resolution) can be opened together as ONE dataset. `st$vmap` then maps each
+# resolution (as a character key) to the file that serves it, and `st$vfac`
+# maps each file path to a brightness factor that puts it on the reference
+# (overview) file's value scale — the whole-chromosome sum ratio, computed
+# once in do_open(). Sample A reads go through .vpath_a()/.vfac_a(); both are
+# NULL for an ordinary single-file dataset, which keeps this a no-op.
+#
 # `st` is an environment holding: path, chr, chrlen, res (available bp
 # resolutions, ascending), norm, color, vmin, vmax, and a cached `blank` tile.
-# For comparison it also holds: path2, norm2, bfac, cmpMode, cmpDiag.
+# For comparison it also holds: path2, norm2, bfac, cmpMode, cmpDiag; for a
+# virtual dataset: vmap, vfac (see above).
 # ============================================================================
 
 TILE_PX <- 256L
 
 choose_res <- function(bpp, res_asc) {
   res_asc[which.min(abs(log2(res_asc) - log2(bpp)))]
+}
+
+# ---- virtual multi-resolution dataset helpers (see header) -----------------
+# which file serves sample A at this resolution
+.vpath_a <- function(st, res) {
+  vm <- st$vmap
+  if (is.null(vm)) return(st$path)
+  p <- vm[[as.character(res)]]
+  if (is.null(p)) st$path else p
+}
+# brightness factor for that file (reference file = 1)
+.vfac_a <- function(st, path) {
+  f <- st$vfac
+  if (is.null(f)) return(1)
+  v <- f[[path]]
+  if (is.null(v) || length(v) != 1 || !is.finite(v) || v <= 0) 1 else v
 }
 
 # human-readable resolution label, e.g. 10000 -> "10 kb", 500 -> "500 bp"
@@ -135,6 +162,11 @@ render_tile <- function(st, z, x, y, src = "a") {
   mode <- if (is.null(st$path2) || !nzchar(st$path2)) "single"
           else if (is.null(st$cmpMode)) "single" else st$cmpMode
 
+  # sample A's file and brightness factor at this resolution (virtual
+  # datasets read a different file per resolution; single files pass through)
+  pA <- .vpath_a(st, res)
+  fA <- .vfac_a(st, pA)
+
   # depth correction: put B on A's count scale
   bfac <- st$bfac
   if (is.null(bfac) || length(bfac) != 1 || !is.finite(bfac) || bfac <= 0) bfac <- 1
@@ -159,11 +191,12 @@ render_tile <- function(st, z, x, y, src = "a") {
     #          and therefore does.
     #   sub  : A - B                        - absolute change. This IS in count
     #          units, so both it and its limit scale with bin area.
-    vA <- .tile_values(st$path,  st$chr, st$norm,  res,
+    vA <- .tile_values(pA,       st$chr, st$norm,  res,
                        st$chrlen, x0, x1, y0, y1, bpp)
     vB <- .tile_values(st$path2, st$chr, st$norm2, res,
                        st$chrlen, x0, x1, y0, y1, bpp)
     if (is.null(vA) || is.null(vB)) return(blank_tile(st))
+    vA <- vA * fA
     vB <- vB * bfac
 
     f   <- (res / st$ovres)^2
@@ -188,11 +221,12 @@ render_tile <- function(st, z, x, y, src = "a") {
     #   lower-left  (genomic x < y) = sample B   -> exists when y1 > x0
     needA <- x1 > y0
     needB <- y1 > x0
-    vA <- if (needA) .tile_values(st$path,  st$chr, st$norm,  res,
+    vA <- if (needA) .tile_values(pA,       st$chr, st$norm,  res,
                                   st$chrlen, x0, x1, y0, y1, bpp) else NULL
     vB <- if (needB) .tile_values(st$path2, st$chr, st$norm2, res,
                                   st$chrlen, x0, x1, y0, y1, bpp) else NULL
     if (is.null(vA) && is.null(vB)) return(blank_tile(st))
+    if (!is.null(vA)) vA <- vA * fA
     if (!is.null(vB)) vB <- vB * bfac
 
     px <- 0:(TILE_PX - 1)
@@ -206,9 +240,10 @@ render_tile <- function(st, z, x, y, src = "a") {
     if (!is.null(vA)) val[upper]  <- vA[upper]
     if (!is.null(vB)) val[!upper] <- vB[!upper]
   } else {
-    val <- .tile_values(st$path, st$chr, st$norm, res,
+    val <- .tile_values(pA, st$chr, st$norm, res,
                         st$chrlen, x0, x1, y0, y1, bpp)
     if (is.null(val)) return(blank_tile(st))
+    val <- val * fA
   }
 
   # Contact counts scale ~ resolution^2 (a coarse bin sums finer bins), so scale

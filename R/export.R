@@ -44,9 +44,13 @@ read_export_matrix <- function(st, chr, start, end, target_bins = 1500) {
   if (span / res > 4000) {                                  # keep matrix tractable
     res <- st$res[which.min(abs(st$res - span / 2000))]
   }
-  m <- read_hic_map(st$path, chr = chr, start = start, end = end,
+  # virtual multi-resolution dataset: this resolution's file + its brightness
+  # factor (see tiles.R); ordinary single files pass straight through
+  pA <- .vpath_a(st, res)
+  m <- read_hic_map(pA, chr = chr, start = start, end = end,
                     resolution = res, normalization = st$norm,
                     chr2 = chr, start2 = start, end2 = end)  # square, same range
+  m <- m * .vfac_a(st, pA)
 
   has_b <- !is.null(st$path2) && nzchar(st$path2)
   split <- identical(st$cmpMode, "split") && has_b

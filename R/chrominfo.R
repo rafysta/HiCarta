@@ -53,7 +53,18 @@ track_chrom_info <- function(path, type = "bigWig") {
   }
 
   # ---- bigWig: the header knows the chromosome lengths ---------------------
+  # The BBI chromosome B+ tree names every chromosome with its exact length,
+  # so a bigWig alone is enough to establish the coordinate system — no
+  # separate chrom-sizes file needed. The native reader parses it for local
+  # files AND http(s) URLs (rtracklayer, the fallback, is local-only).
   if (grepl("\\.(bw|bigwig)$", tolower(path))) {
+    if (exists("bw_reader")) {
+      ci <- tryCatch({
+        ch <- bw_chroms(bw_reader(path))
+        stats::setNames(as.numeric(ch$size), as.character(ch$name))
+      }, error = function(e) NULL)
+      if (!is.null(ci) && length(ci) > 0) return(ci)
+    }
     si <- tryCatch(GenomeInfoDb::seqinfo(rtracklayer::BigWigFile(path)),
                    error = function(e) NULL)
     ci <- if (is.null(si)) NULL else .chrom_from_seqinfo(si)

@@ -97,4 +97,4 @@ There is a third value, `strawr`, which uses the legacy [strawr](https://cran.r-
 
 ### Change the startup defaults (config.txt)
 
-Defaults such as the menu URL, track list and interface language are saved in `config.txt` in the same folder as the app. You can edit them from **Setting → Edit config file…** inside the app (see **[Screens & controls](interface.md)** for details). To edit it manually, copy `config.example.txt` to `config.txt` and edit it.
+Defaults such as the catalog URL, remote-file reading mode, IGV genome id and interface language are saved in `config.txt` in the same folder as the app. You can edit them from **Setting → Edit config file…** inside the app (see **[Screens & controls](interface.md)** for details). To edit it manually, copy `config.example.txt` to `config.txt` and edit it.

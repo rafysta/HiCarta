@@ -12,7 +12,7 @@ You can explore a Hi-C contact map with the same feel as a map app. Drag to pan 
 
 ### Read `.hic` files directly
 
-You can read Juicer-format `.hic` files directly. Pick a sample, dataset, normalization and resolution from a prepared menu, or point to a local `.hic` file on your computer.
+You can read Juicer-format `.hic` files directly. Pick a sample from your [data catalog](data-catalog.md) — an Excel file listing your samples — and open it; normalization and resolution can be preset per sample or switched after opening.
 
 → [Load a Hi-C map](usage.md#load-hic)
 

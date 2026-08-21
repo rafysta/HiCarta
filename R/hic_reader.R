@@ -393,6 +393,96 @@
 
 
 # ---------------------------------------------------------------------------
+# chromosome name -> index, tolerating a "chr" prefix mismatch either way.
+# ---------------------------------------------------------------------------
+.hic_chr_index <- function(rd, nm) {
+  i <- match(nm, rd$chroms$name)
+  if (is.na(i)) {
+    alt <- if (grepl("^chr", nm)) sub("^chr", "", nm) else paste0("chr", nm)
+    i <- match(alt, rd$chroms$name)
+  }
+  if (is.na(i)) stop("chromosome '", nm, "' is not in this file; available: ",
+                     paste(rd$chroms$name, collapse = ", "), call. = FALSE)
+  rd$chroms$index[i]
+}
+
+# ---------------------------------------------------------------------------
+# .hic_zoom_res(): the resolutions ONE chromosome pair really carries.
+#
+# The file header lists the resolutions the file was BUILT with, globally.
+# Each chromosome-pair matrix, however, stores its own MatrixZoomData records
+# and can hold fewer of them - juicer drops a zoom level whose bins would be
+# empty for that pair, and a pair written by a later run can lag behind the
+# header. Reading at a level the pair does not carry throws (see
+# .hic_block_index), which in the viewer shows up as a blank map at the
+# deepest zoom. So callers that build a zoom ladder must ask the pair, not the
+# header. Only the record headers are walked - no block data is read - and the
+# answer is cached per (pair, unit).
+# ---------------------------------------------------------------------------
+.hic_zoom_res <- function(rd, c1, c2 = c1, unit = "BP") {
+  key <- .k("zoomres", c1, c2, unit)
+  hit <- rd$blockidx[[key]]
+  if (!is.null(hit)) return(hit)
+
+  ft <- .hic_read_footer(rd)
+  p  <- ft$matrixIndex[[paste0(c1, "_", c2)]]
+  if (is.null(p)) return(numeric(0))    # no matrix for this pair at all
+
+  hd <- rawConnection(.hic_range(rd, p, 12), "rb")
+  .rc_i32(hd); .rc_i32(hd); nRes <- .rc_i32(hd); close(hd)
+  p <- p + 12
+
+  out <- numeric(0)
+  for (i in seq_len(nRes)) {
+    # one range read per record: 41 bytes covers the longest header
+    # ("FRAG" = 5 + 9 fixed 4-byte fields), and the unit's first byte tells us
+    # how much of it the header actually occupies.
+    raw41 <- .hic_range(rd, p, 41)
+    hs <- 5L * 4L + 4L * 4L +
+      if (raw41[1] == charToRaw("B")) 3L
+      else if (raw41[1] == charToRaw("F")) 5L
+      else break                        # unknown unit: stop walking, keep what we have
+
+    hc <- rawConnection(raw41[seq_len(hs)], "rb")
+    u  <- .rc_cstr(hc)
+    .rc_i32(hc)                                   # legacy zoom index
+    .rc_f32(hc); .rc_f32(hc); .rc_f32(hc); .rc_f32(hc)  # sum, occupied, sd, pct95
+    binSize <- .rc_i32(hc)
+    .rc_i32(hc); .rc_i32(hc)                      # blockBinCount, blockColumnCount
+    nBlocks <- .rc_i32(hc)
+    close(hc)
+
+    if (identical(u, unit) && nBlocks > 0L) out <- c(out, binSize)
+    p <- p + hs + nBlocks * 16L
+  }
+  out <- sort(unique(out))
+  rd$blockidx[[key]] <- out
+  out
+}
+
+# ---------------------------------------------------------------------------
+# hic_chr_resolutions(): resolutions usable for one chromosome (pair) with a
+# given normalization - i.e. present in the pair's matrix AND, for a
+# normalized read, backed by a normalization vector at that resolution
+# (a file can carry ICE at 5 kb but not at 1 kb). This is the list a viewer
+# should build its zoom ladder from.
+# ---------------------------------------------------------------------------
+hic_chr_resolutions <- function(rd, chr1, chr2 = chr1,
+                                normalization = "NONE", unit = "BP") {
+  c1 <- .hic_chr_index(rd, chr1)
+  c2 <- .hic_chr_index(rd, chr2)
+  if (c1 > c2) { tmp <- c1; c1 <- c2; c2 <- tmp }   # straw's pair ordering
+  res <- .hic_zoom_res(rd, c1, c2, unit)
+  if (!length(res) || identical(normalization, "NONE")) return(res)
+  ni <- .hic_read_footer(rd)$normIndex
+  keep <- vapply(res, function(r)
+    !is.null(ni[[.k(normalization, c1, unit, r)]]) &&
+    !is.null(ni[[.k(normalization, c2, unit, r)]]), logical(1))
+  res[keep]
+}
+
+
+# ---------------------------------------------------------------------------
 # decompress + decode one block -> list(x, y, v) of bin indices and counts
 # ---------------------------------------------------------------------------
 .hic_decode_block <- function(rd, cmp) {
@@ -640,18 +730,8 @@ hic_meta <- function(rd) {
 hic_records <- function(rd, chr1, start1, end1, chr2 = chr1,
                         start2 = start1, end2 = end1,
                         resolution, normalization = "NONE", unit = "BP") {
-  ci <- function(nm) {
-    i <- match(nm, rd$chroms$name)
-    if (is.na(i)) {
-      # tolerate chr-prefix mismatch in either direction
-      alt <- if (grepl("^chr", nm)) sub("^chr", "", nm) else paste0("chr", nm)
-      i <- match(alt, rd$chroms$name)
-    }
-    if (is.na(i)) stop("chromosome '", nm, "' is not in this file; available: ",
-                       paste(rd$chroms$name, collapse = ", "), call. = FALSE)
-    rd$chroms$index[i]
-  }
-  i1 <- ci(chr1); i2 <- ci(chr2)
+  # tolerates a chr-prefix mismatch in either direction
+  i1 <- .hic_chr_index(rd, chr1); i2 <- .hic_chr_index(rd, chr2)
 
   # straw orders the pair by chromosome index and swaps the regions with it
   if (i1 <= i2) {
