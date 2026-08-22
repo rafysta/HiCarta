@@ -37,6 +37,8 @@ source("R/chrominfo.R",    local = TRUE)
 source("R/export.R",       local = TRUE)
 
 APP_VERSION <- "4.0 (2026-07)"
+# Online manual (MkDocs site built from docs/ by .github/workflows/docs.yml)
+MANUAL_URL  <- "https://rafysta.github.io/HiCarta/"
 
 # ---- config.txt (key = value) in the app folder: startup defaults -----------
 read_config <- function(path) {
@@ -907,6 +909,9 @@ ui <- function(request) {
         tabsetPanel(id = "disp_tab", type = "tabs",
           # -- contact-map display: palette, value scale, map height --
           tabPanel(tr("disp_tab_map"),
+            # Order: what the numbers MEAN first (normalization, then the bin
+            # size they are counted over), then the value scale built on them,
+            # then how they are coloured, and the map's own size last.
             div(style = "padding-top:12px;",
               # normalization switcher: choices come from the opened file
               # (ICE / KR / ... / Raw); changing it re-reads the overview,
@@ -914,13 +919,14 @@ ui <- function(request) {
               selectInput("norm_sel", tr("disp_norm"),
                           setNames("NONE", tr("disp_norm_raw"))),
               uiOutput("norm_note"),
-              selectInput("color", tr("disp_palette"), c("matlab", "gentle", "red", "blue")),
-              uiOutput("scale_controls"),
               hr(),
               # map-resolution control: auto (switch with zoom) or a fixed
               # resolution chosen with the slider (independent of view area)
               checkboxInput("map_res_auto", tr("disp_res_auto"), value = TRUE),
               uiOutput("map_res_ui"),
+              hr(),
+              uiOutput("scale_controls"),
+              selectInput("color", tr("disp_palette"), c("matlab", "gentle", "red", "blue")),
               hr(),
               fluidRow(
                 column(6, numericInput("map_height", tr("set_map_height"), 720, min = 200, step = 20)),
@@ -954,6 +960,9 @@ ui <- function(request) {
         p(tags$small(tr("about_former"))),
         p(sprintf(tr("about_version"), APP_VERSION)),
         p(tr("about_author"), tags$a(href = "mailto:rafysta@gmail.com", "rafysta@gmail.com"), ")"),
+        # the online manual; opens in a new tab so the session is not lost
+        p(tags$a(href = MANUAL_URL, target = "_blank", rel = "noopener",
+                 tr("about_manual"))),
         p(tr("about_desc")),
         tags$ul(
           tags$li(tr("about_feat1")),
