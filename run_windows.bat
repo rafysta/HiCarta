@@ -7,7 +7,13 @@ REM ==========================================================================
 setlocal
 set "PORT=7788"
 set "APPDIR=%~dp0"
-set "PKGS=c('shiny','leaflet','htmlwidgets','base64enc','data.table','RColorBrewer','jsonlite','shinyFiles','readxl','writexl','DT','strawr','rtracklayer')"
+
+REM --- the required package list lives in R\required_packages.R -------------
+REM     Do NOT keep a second copy here. This launcher used to list strawr and
+REM     rtracklayer, which the installer treats as OPTIONAL, so on a machine
+REM     that cannot build them the check below failed on every start and
+REM     re-ran the whole installer.
+set "PKGCHECK=source('R/required_packages.R'); m<-hicarta_missing()"
 
 REM --- guard: CMD cannot use a UNC path as the current directory ------------
 REM     e.g. \\wsl.localhost\Ubuntu\home\you\HiCarta or \\server\share\HiCarta
@@ -18,6 +24,7 @@ if "%APPDIR:~0,2%"=="\\" goto :unc
 cd /d "%APPDIR%"
 if errorlevel 1 goto :nocd
 if not exist "app.R" goto :noapp
+if not exist "R\required_packages.R" goto :noinstaller
 
 REM --- locate Rscript -------------------------------------------------------
 set "RSCRIPT="
@@ -37,18 +44,18 @@ for /f "tokens=5" %%P in ('netstat -ano ^| findstr :%PORT% ^| findstr LISTENING'
 )
 
 REM --- first run: install packages if anything is missing -------------------
-"%RSCRIPT%" -e "p<-%PKGS%; m<-p[!sapply(p,requireNamespace,quietly=TRUE)]; if(length(m)){cat('Missing packages:',paste(m,collapse=', '),'\n'); quit(status=10)}"
+"%RSCRIPT%" -e "%PKGCHECK%; if(length(m)){cat('Missing packages:',paste(m,collapse=', '),'\n'); quit(status=10)}"
 if not errorlevel 10 goto :launch
 
 if not exist "R\install_libraries.R" goto :noinstaller
 echo.
 echo Installing required R packages (first run only).
-echo The first run can take 10-20 minutes: rtracklayer is built from Bioconductor.
+echo This can take 10-20 minutes: rtracklayer is built from Bioconductor.
 echo.
 "%RSCRIPT%" "R\install_libraries.R"
 
 REM --- verify the install really worked before starting the app -------------
-"%RSCRIPT%" -e "p<-%PKGS%; m<-p[!sapply(p,requireNamespace,quietly=TRUE)]; if(length(m)){cat('STILL MISSING:',paste(m,collapse=', '),'\n'); quit(status=10)}"
+"%RSCRIPT%" -e "%PKGCHECK%; if(length(m)){cat('STILL MISSING:',paste(m,collapse=', '),'\n'); quit(status=10)}"
 if errorlevel 10 goto :pkgfail
 
 REM --- launch ---------------------------------------------------------------
@@ -113,8 +120,8 @@ exit /b 1
 
 :noinstaller
 echo.
-echo [ERROR] Required R packages are missing, but R\install_libraries.R
-echo         was not found in %CD%.
+echo [ERROR] R\install_libraries.R or R\required_packages.R was not found in
+echo         %CD%.
 echo The download looks incomplete - re-clone the repository.
 pause
 exit /b 1
@@ -126,8 +133,12 @@ echo         above as STILL MISSING could not be installed.
 echo.
 echo Common causes:
 echo   - No internet access, or a proxy / firewall blocking CRAN.
-echo   - rtracklayer (Bioconductor) failed to build. Install Rtools matching
-echo     your R version: https://cran.r-project.org/bin/windows/Rtools/
+echo   - An old R. CRAN stops publishing new pre-built packages for old R
+echo     releases, so they have to be built from source instead. Installing
+echo     the current R from https://cran.r-project.org is usually the
+echo     quickest fix.
+echo   - Rtools missing, which is what breaks that build. Install the version
+echo     matching your R: https://cran.r-project.org/bin/windows/Rtools/
 echo   - No write permission on the R library folder. Start R once and run
 echo     install.packages("shiny") to let it create a personal library.
 echo.

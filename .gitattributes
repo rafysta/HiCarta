@@ -1,0 +1,8 @@
+# Line endings must survive a checkout on any platform.
+# run_mac.command is executed by bash: a stray CR makes macOS report
+# "bad interpreter: /bin/bash^M". run_windows.bat is read by cmd.exe.
+*.command  text eol=lf
+*.sh       text eol=lf
+*.bat      text eol=crlf
+*.R        text
+*.md       text
