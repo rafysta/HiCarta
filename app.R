@@ -1154,6 +1154,48 @@ server <- function(input, output, session) {
   cat_ui_env <- new.env(parent = emptyenv())   # cascade choice cache
   cat_q_name_d <- debounce(reactive(input$cat_q_name %||% ""), 300)
   cat_q_all_d  <- debounce(reactive(input$cat_q_all  %||% ""), 300)
+  cat_q_id_d   <- debounce(reactive(input$cat_q_id   %||% ""), 300)
+
+  # Turn an id expression into a keep-vector over `ids` (the catalog's numeric
+  # id column). Single numbers and ranges, separated by commas or spaces:
+  #
+  #   51            one entry
+  #   51 54 60      several
+  #   51-54         a closed range
+  #   60-           60 and everything above it
+  #   -20           everything up to 20
+  #   51, 60-70     the two combined (tokens are ORed)
+  #
+  # Returns NULL when the box is empty or holds nothing usable, so a half-typed
+  # expression ("5" then "51-") leaves the list alone instead of emptying it.
+  parse_id_query <- function(q, ids) {
+    q <- trimws(q %||% "")
+    if (!nzchar(q)) return(NULL)
+    # "51 - 54" means the same as "51-54": close up spaces around a range mark
+    # before splitting, or the dash becomes a token of its own
+    q <- gsub("[[:space:]]*([-:~])[[:space:]]*", "\\1", q)
+    toks <- unlist(strsplit(q, "[,;[:space:]]+")); toks <- toks[nzchar(toks)]
+    if (!length(toks)) return(NULL)
+    num  <- suppressWarnings(as.numeric(ids))
+    hit  <- rep(FALSE, length(num))
+    used <- FALSE
+    for (t in toks) {
+      if (grepl("^[0-9]+(\\.[0-9]+)?$", t)) {
+        hit <- hit | (!is.na(num) & num == as.numeric(t))
+        used <- TRUE
+      } else if (grepl("[0-9]", t) &&
+                 grepl("^[0-9]*(\\.[0-9]+)?[-:~][0-9]*(\\.[0-9]+)?$", t)) {
+        pr <- strsplit(t, "[-:~]")[[1]]
+        lo <- suppressWarnings(as.numeric(pr[1]))
+        hi <- suppressWarnings(as.numeric(if (length(pr) > 1) pr[2] else NA))
+        if (is.na(lo)) lo <- -Inf
+        if (is.na(hi)) hi <- Inf
+        hit <- hit | (!is.na(num) & num >= lo & num <= hi)
+        used <- TRUE
+      }
+    }
+    if (!used) NULL else hit
+  }
 
   # keep-vector over the catalog rows; skip_id leaves one dropdown out so the
   # cascade can compute that dropdown's choices from all OTHER conditions
@@ -1164,6 +1206,8 @@ server <- function(input, output, session) {
       v <- tolower(cat$data[[cat$name_col]]); v[is.na(v)] <- ""
       keep <- keep & grepl(qn, v, fixed = TRUE)
     }
+    qi <- parse_id_query(cat_q_id_d(), cat$id)
+    if (!is.null(qi) && length(qi) == length(keep)) keep <- keep & qi
     qa <- tolower(trimws(cat_q_all_d()))
     if (nzchar(qa)) {                       # every column, hidden ones too
       hit <- rep(FALSE, nrow(cat$data))
@@ -1214,7 +1258,10 @@ server <- function(input, output, session) {
       tags$b(tr("cat_filter_title")),
       div(style = "margin-top:6px;",
         textInput("cat_q_name", tr("cat_q_name"), ""),
-        textInput("cat_q_all",  tr("cat_q_all"),  "")),
+        textInput("cat_q_all",  tr("cat_q_all"),  ""),
+        textInput("cat_q_id",   tr("cat_q_id"),   "",
+                  placeholder = tr("cat_q_id_ph")),
+        div(style = "margin:-6px 0 8px 0;", tags$small(tr("cat_q_id_hint")))),
       lapply(fl, function(f)
         selectInput(f$id, f$name,
                     choices = catalog_filter_choices(cat, f$j),
@@ -1261,6 +1308,7 @@ server <- function(input, output, session) {
   observeEvent(input$cat_f_reset, {
     updateTextInput(session, "cat_q_name", value = "")
     updateTextInput(session, "cat_q_all",  value = "")
+    updateTextInput(session, "cat_q_id",   value = "")
     for (f in rv$cat_filters)
       updateSelectInput(session, f$id, selected = character(0))
     updateSelectInput(session, "cat_f_date", selected = character(0))
@@ -1593,6 +1641,16 @@ server <- function(input, output, session) {
       if (length(hit)) return(hit[1])
     }
     "NONE"
+  }
+
+  # Short display name for a normalization, used by the coordinate readout and
+  # the printed caption. "NONE" is the file's word for raw counts; nobody calls
+  # it that, and a figure that says "NONE" reads as "missing" rather than "raw".
+  norm_label <- function(n) {
+    if (is.null(n) || length(n) != 1 || is.na(n) || !nzchar(n) ||
+        identical(toupper(n), "NONE"))
+      tr("disp_norm_raw_short")
+    else n
   }
 
   # push the available normalizations into the Display > Map switcher
@@ -2175,7 +2233,23 @@ server <- function(input, output, session) {
         }
       }
       norms_b <- tryCatch(hic_norms(path), error = function(e) character(0))
-      norm <- pick_norm(norm, norms_b)   # explicit if offered, else ICE->KR->Raw
+      # B is ALWAYS read with the same normalization as A, whatever the caller
+      # asked for. The comparison views subtract or divide the two matrices, so
+      # mixing raw counts with balanced values produces a picture that looks
+      # perfectly plausible and means nothing: the bins carrying the largest
+      # normalization factors turn into a bright cross. (This is exactly what
+      # went wrong before - "Raw" changed A alone and left B on ICE/KR.)
+      # `norm` is only the fallback for the case where A has no normalization
+      # set yet, and a file that cannot offer A's normalization is refused here
+      # rather than quietly substituting a different one.
+      want <- st$norm %||% norm %||% "NONE"
+      if (!(identical(toupper(want), "NONE") || want %in% norms_b)) {
+        clear_cmp(msg = sprintf(tr("msg_cmp_no_norm"), norm_label(want),
+                                paste(vapply(unique(c(norms_b, "NONE")), norm_label,
+                                             character(1)), collapse = ", ")))
+        return(invisible(NULL))
+      }
+      norm <- want
       # B's resolutions for THIS chromosome under THIS normalization, for the
       # same reason as sample A's (see res_for_chr): the header list can
       # advertise levels the chromosome has no data at.
@@ -3106,24 +3180,30 @@ server <- function(input, output, session) {
       rv$logmin <- log10(rv$dfloor)
       rv$logmax <- log10(max(rv$dmax, rv$dfloor * 10))
       st$vmin <- 0; st$vmax <- p99
-      # the comparison depth factor compares A's and B's overview totals, and
-      # A's overview just changed scale
-      if (isTRUE(rv$has_b)) {
-        tot_a <- total_counts(rv$ov); tot_b <- total_counts(rv$ov_b)
-        if (is.finite(tot_a) && is.finite(tot_b) && tot_b > 0) {
-          rv$bfac_auto <- tot_a / tot_b
-          apply_cmp(redraw = FALSE)
-        }
+      # The comparison sample has to follow. A and B are subtracted from (or
+      # divided by) each other, so leaving B on the normalization it was opened
+      # with silently compares two different quantities. Re-opening B under the
+      # new normalization is what keeps everything derived from B's values
+      # consistent too: the depth factor, the shared resolution ladder and the
+      # difference-map colour limits are all recomputed there.
+      # rv$res_all_a is A's own ladder, which has just changed.
+      if (isTRUE(rv$has_b) && !is.null(rv$src_b)) {
+        rv$res_all_a <- res_all
+        do_open_b(rv$src_b, norm = nn, name = rv$sample_name_b)
       }
+      # B may have narrowed the usable resolutions (or been detached because it
+      # cannot offer this normalization), so the deep-zoom grid below is built
+      # from the ladder that is actually in force now.
+      res_eff <- rv$res_all %||% res_all
       # If the finest usable resolution changed, the deep-zoom grid itself has
       # to change (its deepest level is 1 px = baseRes bp). Rebuild it and
       # re-init the tile layer on the SAME view, so the switch still feels like
       # a redraw rather than a re-open.
       message(sprintf("[norm] %s chr=%s res=%s baseRes=%s->%s", nn, rv$chr,
-                      paste(res_all, collapse = "/"), rv$baseRes, min(res_all)))
-      if (!isTRUE(all.equal(min(res_all), rv$baseRes))) {
+                      paste(res_eff, collapse = "/"), rv$baseRes, min(res_eff)))
+      if (!isTRUE(all.equal(min(res_eff), rv$baseRes))) {
         leny    <- rv$chrlen_y %||% rv$chrlen
-        baseRes <- min(res_all)
+        baseRes <- min(res_eff)
         Nfine   <- ceiling(max(rv$chrlen, leny) / baseRes)
         maxZoom <- max(1, ceiling(log2(Nfine / TILE_PX)))
         SCALE   <- baseRes * 2^maxZoom
@@ -3264,6 +3344,16 @@ server <- function(input, output, session) {
         !is.null(rv$sample_name_b))
       nameLab <- paste0(trimws(nameLab, "right"),
                         sprintf(tr("coord_cmp"), rv$sample_name_b), "   ")
+    # Name the normalization the map is drawn with. A comparison map is only
+    # meaningful when A and B are on the same one, and the picture itself gives
+    # no clue which was used - so say it, and show both if they ever diverge.
+    nrmA <- norm_label(st$norm)
+    nrmB <- if (isTRUE(rv$has_b)) norm_label(rv$norm_b) else NULL
+    nameLab <- paste0(nameLab,
+                      sprintf(tr("coord_norm"),
+                              if (is.null(nrmB) || identical(nrmA, nrmB)) nrmA
+                              else paste0(nrmA, " / ", nrmB)),
+                      "   ")
     # A genome-wide view is in global bp, which means nothing to a reader:
     # show where each edge falls as chromosome + position within it.
     if (!is.null(rv$genome)) {
@@ -3586,6 +3676,9 @@ server <- function(input, output, session) {
           tags$hr(style = "margin:8px 0;"),
           checkboxInput("exp_ticks", tr("print_ticks"), TRUE),
           checkboxInput("exp_legend", tr("print_legend"), TRUE),
+          # sample names / normalization / region / resolution, printed under
+          # the map so the figure identifies itself away from the app
+          checkboxInput("exp_caption", tr("print_caption"), TRUE),
           # equal bp per mm on both axes - without it the map is stretched to
           # whatever shape the paper leaves it, which distorts any region whose
           # two axes span different numbers of bp
@@ -3741,18 +3834,51 @@ server <- function(input, output, session) {
   # Extra drawing arguments for a two-sample split export: the diagonal rule and
   # the corner captions naming each half. Empty list when not in split view, so
   # do.call() below is a no-op for the ordinary single-sample export.
+  #
+  # A difference map gets no corner box any more - it has nothing to label, and
+  # the sample names now live in the caption under the map, where a long one
+  # has room to wrap instead of overflowing a one-line legend.
   export_split_args <- function(d) {
     if (is.null(d)) return(list())
-    if (isTRUE(d$diff))
-      return(list(diff = TRUE,
-                  label_a = sprintf(tr("cmp_label_diff"),
-                                    if (identical(st$diffType, "sub")) tr("cmp_diff_sub_short")
-                                    else tr("cmp_diff_log2_short"),
-                                    rv$sample_name %||% "A", rv$sample_name_b %||% "B")))
+    if (isTRUE(d$diff)) return(list(diff = TRUE))
     if (!isTRUE(d$split)) return(list())
     list(diagonal = isTRUE(st$cmpDiag),
          label_a = sprintf(tr("cmp_label_a"), rv$sample_name %||% "A"),
          label_b = sprintf(tr("cmp_label_b"), rv$sample_name_b %||% "B"))
+  }
+
+  # The block printed under the map: which sample(s) the picture is made of,
+  # how each was normalized, and exactly which region and bin size it covers.
+  # A printed figure travels on its own, so everything needed to identify it
+  # has to be inside the image - and on its own line, because a sample name can
+  # easily be longer than the page is wide.
+  export_caption <- function(d) {
+    # the checkbox defaults to on; NULL means it has not been registered yet
+    # (first pass through the modal), which is not the same as switched off
+    if (isFALSE(input$exp_caption)) return(NULL)
+    gx <- exp_x_region(); yy <- exp_y_region()
+    reg <- sprintf(tr("print_cap_region"),
+                   gx$chr, fmt_bp(gx$start), fmt_bp(gx$end),
+                   yy$chr, fmt_bp(yy$start), fmt_bp(yy$end),
+                   if (is.null(d)) "-" else fmt_res(d$res))
+    nmA <- rv$sample_name %||% "A"
+    nrA <- norm_label(st$norm)
+    two <- !is.null(d) && (isTRUE(d$diff) || isTRUE(d$split))
+    if (!two) return(c(sprintf("%s  [%s]", nmA, nrA), reg))
+    # B is drawn multiplied by the depth factor; a reader comparing numbers off
+    # the colour bar needs to know that, so it is named when it is not 1.
+    bf   <- st$bfac
+    bftx <- if (!is.null(bf) && is.finite(bf) && !isTRUE(all.equal(bf, 1)))
+              sprintf("  x%s", signif(bf, 4)) else ""
+    head <- if (isTRUE(d$diff))
+              (if (identical(st$diffType, "sub")) tr("cmp_diff_sub_short")
+               else tr("cmp_diff_log2_short"))
+            else tr("print_cap_split")
+    c(head,
+      sprintf("A : %s  [%s]", nmA, nrA),
+      sprintf("B : %s  [%s]%s", rv$sample_name_b %||% "B",
+              norm_label(rv$norm_b), bftx),
+      reg)
   }
 
   # the palette argument depends on the mode: a difference map uses the
@@ -3783,6 +3909,7 @@ server <- function(input, output, session) {
       no_margin = isTRUE(input$exp_nomargin),
       tracks = build_export_tracks(s, e),
       map_weight = input$map_height %||% 720,
+      caption = export_caption(d),
       chr_y = yy$chr, ystart = yy$start, yend = yy$end,
       equal_scale = isTRUE(input$exp_equal),
       genome = rv$genome), export_split_args(d)))
@@ -3816,6 +3943,7 @@ server <- function(input, output, session) {
     if (is.null(d) && length(exp_tracks) == 0) { rv$exp_msg <- tr("print_need_data"); return() }
     mapw <- input$map_height %||% 720
     split_args <- export_split_args(d)
+    capt <- export_caption(d)
     pal <- exp_palette(d)
     yy  <- exp_y_region()
     gx  <- gxr
@@ -3826,7 +3954,7 @@ server <- function(input, output, session) {
         color = pal, vmin = b$vmin, vmax = b$vmax,
         ticks = isTRUE(input$exp_ticks), legend = isTRUE(input$exp_legend),
         no_margin = isTRUE(input$exp_nomargin),
-        tracks = exp_tracks, map_weight = mapw,
+        tracks = exp_tracks, map_weight = mapw, caption = capt,
         chr_y = yy$chr, ystart = yy$start, yend = yy$end,
         equal_scale = isTRUE(input$exp_equal),
         genome = rv$genome), split_args))

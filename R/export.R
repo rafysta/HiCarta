@@ -36,6 +36,38 @@ fmt_bp <- function(v) {
   }, character(1))
 }
 
+# Break caption lines that are wider than `avail` inches at `cex`, so a long
+# sample path spills onto an indented continuation line instead of forcing the
+# whole block down to an unreadable size. Breaks after the last separator that
+# still fits (space, slash, backslash, underscore, comma, semicolon); cuts
+# mid-token only when no separator sits in the back half of the line.
+# strwidth(units = "inches") reads the device's font metrics and works before
+# anything has been plotted, so this can run while the layout is still being
+# planned - which is what lets the caption row be given the right height.
+.wrap_caption <- function(lines, avail, cex) {
+  fits <- function(s) {
+    w <- suppressWarnings(graphics::strwidth(s, cex = cex, units = "inches"))
+    !is.finite(w) || w <= avail
+  }
+  out <- character(0)
+  for (s in lines) {
+    guard <- 0L
+    while (!fits(s) && nchar(s) > 8L && guard < 20L) {
+      guard <- guard + 1L
+      k <- nchar(s)
+      while (k > 8L && !fits(substr(s, 1L, k))) k <- k - max(1L, k %/% 12L)
+      while (k < nchar(s) && fits(substr(s, 1L, k + 1L))) k <- k + 1L
+      seg <- substr(s, 1L, k)
+      p   <- suppressWarnings(max(gregexpr("[ \\\\/_,;]", seg)[[1]]))
+      if (!is.finite(p) || p < k * 0.4) p <- k
+      out <- c(out, substr(s, 1L, p))
+      s   <- paste0("    ", substring(s, p + 1L))
+    }
+    out <- c(out, s)
+  }
+  out
+}
+
 # Read a region matrix for export.
 #
 # `resolution` pins the bin size - pass the one the map on screen is drawing
@@ -152,6 +184,13 @@ read_export_matrix <- function(st, chr, start, end, target_bins = 1500,
 #                the whole genome. The axes are then labelled with chromosome
 #                NAMES and ruled at the boundaries - a running bp total across
 #                every chromosome would tell a reader nothing.
+#   caption    : character vector of lines printed in a block under the map
+#                (and under the tracks, when there are any). This is where a
+#                printed figure says which sample(s) it is made of, how they
+#                were normalized, and what region and bin size it covers - a
+#                picture that leaves the app has to carry that with it. The
+#                block gets its own layout row, so it never overlaps the map,
+#                and its text shrinks to fit the page width.
 #   equal_scale: give both axes the same number of bp per mm on paper, so a
 #                given distance means the same thing horizontally and
 #                vertically. Without it the map is stretched to fill whatever
@@ -167,7 +206,7 @@ draw_export_map <- function(m, chr, start, end,
                             ticks = TRUE, legend = TRUE, no_margin = FALSE,
                             tracks = list(), map_weight = 720,
                             diagonal = FALSE, label_a = NULL, label_b = NULL,
-                            diff = FALSE,
+                            diff = FALSE, caption = NULL,
                             chr_y = chr, ystart = start, yend = end,
                             equal_scale = FALSE, genome = NULL) {
   start  <- max(1, as.numeric(start));  end  <- as.numeric(end)
@@ -226,6 +265,43 @@ draw_export_map <- function(m, chr, start, end,
     invisible()
   }
 
+  # ---- caption block ------------------------------------------------------
+  # A vector of lines drawn into its own layout row underneath everything else.
+  # Its height is worked out up front (in inches) so the row can be reserved
+  # before anything is drawn.
+  cap <- caption
+  if (!is.null(cap)) cap <- as.character(cap)[nzchar(as.character(cap))]
+  ncap    <- length(cap)
+  CAP_CEX <- 0.72
+  cap_mar <- c(0.3, if (isTRUE(ticks)) 4.8 else 0.3, 0.6,
+               1)                                  # matches the map's L/R margins
+  if (ncap > 0) {
+    # the block spans the map's column only (the legend keeps its own), so that
+    # is the width a line has to fit into
+    avail <- graphics::par("din")[1] * (if (isTRUE(legend)) 6 / 7 else 1) -
+             (cap_mar[2] + cap_mar[4]) * graphics::par("csi")
+    if (is.finite(avail) && avail > 0.5) cap <- .wrap_caption(cap, avail, CAP_CEX)
+    ncap <- length(cap)
+  }
+  cap_in  <- if (ncap > 0)
+               graphics::par("csi") *
+                 (CAP_CEX * 1.35 * ncap + cap_mar[1] + cap_mar[3])
+             else 0
+  # Draw the caption into the CURRENT layout cell. Lines are left-aligned with
+  # the map body and shrunk together if the longest one overruns the page.
+  .draw_caption <- function() {
+    if (ncap == 0) return(invisible())
+    graphics::par(mar = cap_mar)
+    graphics::plot.new()
+    graphics::plot.window(xlim = c(0, 1), ylim = c(0, 1), xaxs = "i", yaxs = "i")
+    cx <- CAP_CEX
+    w  <- suppressWarnings(max(graphics::strwidth(cap, cex = cx)))
+    if (is.finite(w) && w > 1) cx <- max(0.35, cx / w)
+    ys <- 1 - (seq_len(ncap) - 0.5) / ncap
+    graphics::text(0, ys, cap, adj = c(0, 0.5), cex = cx)
+    invisible()
+  }
+
   # ---- tracks only (no contact map): a coordinate axis + stacked tracks -----
   if (is.null(m)) {
     ntr <- length(tracks)
@@ -235,7 +311,9 @@ draw_export_map <- function(m, chr, start, end,
     axis_h    <- if (isTRUE(ticks)) 60 else 1     # thin row holding the x-axis
     track_mar <- c(0.3, LEFT, 0.3, RIGHT)
     hts <- c(axis_h, vapply(tracks, function(t) as.numeric(t$height), numeric(1)))
-    graphics::layout(matrix(seq_len(ntr + 1L), ncol = 1), heights = hts)
+    if (ncap > 0) hts <- c(hts, graphics::lcm(cap_in * 2.54))
+    nrow_l <- ntr + 1L + (ncap > 0)
+    graphics::layout(matrix(seq_len(nrow_l), ncol = 1), heights = hts)
     op <- graphics::par(mar = c(0.2, LEFT, 3.6, RIGHT)); on.exit(graphics::par(op))
     graphics::plot.new()
     graphics::plot.window(xlim = c(start, end), ylim = c(0, 1), xaxs = "i", yaxs = "i")
@@ -250,6 +328,7 @@ draw_export_map <- function(m, chr, start, end,
         graphics::par(mar = track_mar); graphics::plot.new()
       })
     }
+    .draw_caption()
     return(invisible())
   }
 
@@ -278,7 +357,7 @@ draw_export_map <- function(m, chr, start, end,
   RIGHT <- 1
   TOP   <- if (isTRUE(ticks)) 3.6 else 1      # room for the map's x-axis (on TOP)
   # shared column margins keep the map body and every track x-aligned
-  body_mar  <- c(if (ntr > 0) 0.3 else 0.6, LEFT, TOP, RIGHT)
+  body_mar  <- c(if (ntr > 0 || ncap > 0) 0.3 else 0.6, LEFT, TOP, RIGHT)
   track_mar <- c(0.3, LEFT, 0.3, RIGHT)
 
   # How tall the map body has to be for equal scaling, in inches. Only needed
@@ -296,9 +375,19 @@ draw_export_map <- function(m, chr, start, end,
     if (!is.finite(h) || h <= 0.2) NA_real_ else h
   }
 
-  # ---- figure layout: map row on top, one row per track, optional legend col.
-  if (ntr > 0) {
-    hts <- c(as.numeric(map_weight), vapply(tracks, function(t) as.numeric(t$height), numeric(1)))
+  # ---- figure layout -------------------------------------------------------
+  # Rows: the map, one per track, then the caption. The legend is a narrow
+  # second column beside the map row only. Panel numbers have to be handed to
+  # layout() in the order the panels are DRAWN below (map, legend, tracks,
+  # caption), because layout() sends the n-th plot to the cell holding n.
+  idx_leg <- if (isTRUE(legend)) 2L else NA_integer_
+  nxt     <- if (isTRUE(legend)) 3L else 2L
+  idx_trk <- if (ntr > 0) seq.int(nxt, length.out = ntr) else integer(0)
+  idx_cap <- if (ncap > 0) nxt + ntr else NA_integer_
+
+  if (ntr > 0 || ncap > 0) {
+    hts <- c(as.numeric(map_weight),
+             vapply(tracks, function(t) as.numeric(t$height), numeric(1)))
     # layout() reads a negative height as an ABSOLUTE size in cm (that is all
     # lcm() does); the remaining rows still divide what is left between them in
     # proportion, so the tracks keep their relative heights.
@@ -309,15 +398,22 @@ draw_export_map <- function(m, chr, start, end,
       # keeps the printed figure in the proportions the app was showing. If the
       # stack does not fit the page, drop back to relative heights - asp = 1
       # still gets the scale right, by centring the map in the row it gets.
-      th <- eh * (hts[-1] / as.numeric(map_weight))
-      if (all(is.finite(th)) && sum(c(eh, th)) <= graphics::par("din")[2] * 0.98)
+      #
+      # Sizing the map row exactly is also what puts the caption directly under
+      # the picture: with a relative height the map row swallows the whole page
+      # and, under equal scaling, the map floats in the middle of it.
+      th <- if (ntr > 0) eh * (hts[-1] / as.numeric(map_weight)) else numeric(0)
+      if (all(is.finite(th)) &&
+          sum(c(eh, th, cap_in)) <= graphics::par("din")[2] * 0.98)
         hts <- graphics::lcm(c(eh, th) * 2.54)
     }
+    if (ncap > 0) hts <- c(hts, graphics::lcm(cap_in * 2.54))
+    rows <- c(1L, idx_trk, if (ncap > 0) idx_cap)
     if (isTRUE(legend)) {
-      mat <- cbind(c(1L, seq.int(3L, length.out = ntr)), c(2L, rep(0L, ntr)))
-      graphics::layout(mat, widths = c(6, 1), heights = hts)      # 1=map 2=legend 3..=tracks
+      mat <- cbind(rows, c(idx_leg, rep(0L, length(rows) - 1L)))
+      graphics::layout(mat, widths = c(6, 1), heights = hts)
     } else {
-      graphics::layout(matrix(seq_len(ntr + 1L), ncol = 1), heights = hts)  # 1=map 2..=tracks
+      graphics::layout(matrix(rows, ncol = 1), heights = hts)
     }
   } else if (isTRUE(legend)) {
     graphics::layout(matrix(c(1, 2), nrow = 1), widths = c(6, 1))
@@ -344,12 +440,26 @@ draw_export_map <- function(m, chr, start, end,
     # plot region can be taller or wider than the map itself, and a full-length
     # axis line would run on past the image. The border below is drawn at the
     # map's own edges instead, so it hugs the picture either way.
+    #
+    # pos = anchors each axis to the EDGE OF THE IMAGE rather than to the edge
+    # of the plot region. Without it, a square map on a portrait page (asp = 1
+    # centres the image in a much taller region) had its top ticks stranded at
+    # the top of the page with a wide blank band between them and the map.
     graphics::axis(3, at = tk, labels = fmt_bp(tk), tcl = -0.4, mgp = c(3, 0.5, 0),
-                   lwd = 0, lwd.ticks = 1)
+                   lwd = 0, lwd.ticks = 1, pos = ystart)
     graphics::axis(2, at = ty, labels = fmt_bp(ty), las = 1, tcl = -0.4,
-                   mgp = c(3, 0.6, 0), lwd = 0, lwd.ticks = 1)
-    graphics::title(ylab = chr_y, line = 3.4)
-    if (ntr == 0) graphics::mtext(chr, side = 3, line = 2.3, cex = 1.0)
+                   mgp = c(3, 0.6, 0), lwd = 0, lwd.ticks = 1, pos = start)
+    # ... and the chromosome names have to follow the ticks. One margin line,
+    # converted to user units, is the step both are measured in - the same
+    # distances the mtext()/title() lines used to give.
+    lh <- abs(diff(graphics::grconvertY(c(0, 1), from = "lines", to = "user")))
+    lw <- abs(diff(graphics::grconvertX(c(0, 1), from = "lines", to = "user")))
+    if (is.finite(lw) && lw > 0)
+      graphics::text(start - 3.4 * lw, (ystart + yend) / 2, chr_y,
+                     srt = 90, xpd = NA, cex = 1.0)
+    if (ntr == 0 && is.finite(lh) && lh > 0)
+      graphics::text((start + end) / 2, ystart - 2.3 * lh, chr,
+                     xpd = NA, cex = 1.0)
   }
   .genome_grid()
   .split_marks()
@@ -404,6 +514,9 @@ draw_export_map <- function(m, chr, start, end,
       graphics::par(mar = track_mar); graphics::plot.new()   # blank row on failure
     })
   }
+
+  # ---- caption (sample names, normalization, region, resolution) ----
+  .draw_caption()
   invisible()
 }
 
