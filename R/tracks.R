@@ -174,7 +174,11 @@ track_source <- function(path) {
 # Draw one track. The x-axis spans the FULL map view [vstart,vend] (which may run
 # past the chromosome ends, so it stays aligned with the contact map); signal is
 # only drawn within [1, chrlen]. `nbins` = number of bins across the view.
-# spec$ymax > 0 fixes the vertical scale (else it auto-scales to the view).
+# spec$ymax > 0 fixes the top of the vertical scale (else it auto-scales to the
+# view). spec$ymin, when finite, fixes the bottom and MAY BE NEGATIVE -- that is
+# what lets a subtraction / log-ratio bigWig be shown; when it is NULL/NA the
+# bottom auto-scales to min(0, data min), so ordinary positive tracks keep their
+# familiar 0 baseline and signed tracks open up downwards on their own.
 plot_track <- function(spec, chr, vstart, vend, chrlen = Inf, nbins = 1000,
                        mar = c(0.3, 0, 0.3, 0), frame = TRUE, yscale = "inline") {
   op <- par(mar = mar); on.exit(par(op))
@@ -205,29 +209,55 @@ plot_track <- function(spec, chr, vstart, vend, chrlen = Inf, nbins = 1000,
     val <- if (dend > dstart)
              .track_binned_signal(spec$path, chr, dstart, dend, nbins, agg)
            else rep(0, nbins)
+    # ---- vertical scale --------------------------------------------------
+    # ymax: > 0 fixes the top, otherwise auto = max(data, 0).
+    # ymin: any finite value fixes the bottom, negatives included; NULL/NA means
+    #       auto = min(data, 0). So a positive-only track behaves exactly as
+    #       before and a subtraction track gets room below zero for free.
+    dmax <- suppressWarnings(max(val, na.rm = TRUE))
+    dmin <- suppressWarnings(min(val, na.rm = TRUE))
+    if (!is.finite(dmax)) dmax <- 0
+    if (!is.finite(dmin)) dmin <- 0
     ymax <- if (!is.null(spec$ymax) && is.finite(spec$ymax) && spec$ymax > 0) spec$ymax
-            else { m <- suppressWarnings(max(val, na.rm = TRUE)); if (!is.finite(m) || m <= 0) 1 else m }
-    plot(NA, xlim = c(vstart, vend), ylim = c(0, ymax * 1.05),
+            else max(dmax, 0)
+    ymin <- if (!is.null(spec$ymin) && is.finite(spec$ymin)) spec$ymin
+            else min(dmin, 0)
+    if (!is.finite(ymin)) ymin <- 0
+    if (!is.finite(ymax)) ymax <- 1
+    if (ymax <= ymin) ymax <- ymin + max(abs(ymin) * 0.05, 1)   # never a flat axis
+    span <- ymax - ymin
+    ytop <- ymax + span * 0.05                     # 5% headroom, as before
+    ybot <- if (ymin < 0) ymin - span * 0.05 else ymin   # 0 stays flush at the bottom
+    base <- min(max(0, ymin), ymax)                # bars grow from zero when zero is in range
+
+    plot(NA, xlim = c(vstart, vend), ylim = c(ybot, ytop),
          xaxs = "i", yaxs = "i", axes = FALSE, ann = FALSE)
+    if (base > ybot)                               # visible zero line for signed tracks
+      segments(vstart, base, vend, base, col = "grey70")
     if (dend > dstart) {
-      rect(centers - binw / 2, 0, centers + binw / 2, pmin(val, ymax),
+      hv <- pmin(pmax(val, ymin), ymax)            # saturate at the fixed limits
+      rect(centers - binw / 2, base, centers + binw / 2, hv,
            col = spec$color, border = NA)
     }
-    # name (top-left, larger) + a round score label at ~90% height on the right
-    text(vstart + 0.005 * (vend - vstart), ymax * 1.0, spec$name,
+    # name (top-left, larger) + round score labels on the right
+    text(vstart + 0.005 * (vend - vstart), ymax, spec$name,
          adj = c(0, 1), cex = 1.15, col = "grey20")
     if (identical(yscale, "axis")) {
       # publication style: a real left Y-axis, ticks the SAME length (tcl) as the
       # Hi-C map's axis so they match regardless of track height.
-      at <- pretty(c(0, ymax), 3); at <- at[at >= 0 & at <= ymax * 1.05]
+      at <- pretty(c(ymin, ymax), 3); at <- at[at >= ybot & at <= ytop]
       axis(2, at = at, labels = formatC(at, format = "g", digits = 3), las = 1,
            tcl = -0.4, mgp = c(3, 0.5, 0), cex.axis = 0.8, col = "grey40", col.axis = "grey20")
     } else {
-      nice <- signif(ymax * 0.9, 1)
-      if (is.finite(nice) && nice > 0) {
-        segments(lx, nice, vstart + (1 - 4 / Wpx) * (vend - vstart), nice, col = "grey45")
-        text(lx, nice, sprintf("%.3g ", nice), adj = c(1, 0.5), cex = 1.0, col = "grey20")
+      # inline style: one guide line near the top and, for signed tracks, one
+      # near the bottom so the negative half is readable too.
+      guide <- function(yv) {
+        if (!is.finite(yv) || yv == 0 || yv > ytop || yv < ybot) return(invisible(NULL))
+        segments(lx, yv, vstart + (1 - 4 / Wpx) * (vend - vstart), yv, col = "grey45")
+        text(lx, yv, sprintf("%.3g ", yv), adj = c(1, 0.5), cex = 1.0, col = "grey20")
       }
+      if (ymax > 0) guide(signif(ymax * 0.9, 1))
+      if (ymin < 0) guide(signif(ymin * 0.9, 1))
     }
   }
   if (isTRUE(frame)) box(col = "grey85")

@@ -2453,6 +2453,9 @@ server <- function(input, output, session) {
     tracks <- lapply(unname(rv$tracks), function(t) list(
       path = t$path, type = t$type, name = t$name, color = t$color,
       height = t$height, ymax = if (is.null(t$ymax)) 0 else t$ymax,
+      # ymin: NA means "auto" (bottom follows the data, 0 for positive-only
+      # tracks); a number -- possibly negative -- fixes it.
+      ymin = if (is.null(t$ymin) || !is.finite(t$ymin)) NA else t$ymin,
       agg = if (is.null(t$agg)) "mean" else t$agg,
       bins = t$bins %||% rv$trk_bins))
     bookmarks <- lapply(unname(rv$bookmarks), function(b) list(
@@ -2515,7 +2518,8 @@ server <- function(input, output, session) {
       n <- n + 1L
       tl[[as.character(n)]] <- list(id = n, name = t$name %||% basename(t$path %||% "track"),
         path = t$path, type = t$type %||% "bigWig", color = t$color %||% "darkblue",
-        height = t$height %||% 90, ymax = t$ymax %||% 0, agg = t$agg %||% "mean",
+        height = t$height %||% 90, ymax = t$ymax %||% 0,
+        ymin = suppressWarnings(as.numeric(t$ymin %||% NA))[1], agg = t$agg %||% "mean",
         bins = t$bins %||% rv$trk_bins)
     }
     rv$trk_seq <- n; rv$tracks <- tl
@@ -2652,10 +2656,15 @@ server <- function(input, output, session) {
       color_swatch_grid("trke_color", col0),
       tags$script(sprintf("Shiny.setInputValue('trke_color','%s');", col0)),
       fluidRow(
-        column(6, numericInput("trke_height", tr("set_height"),
+        column(4, numericInput("trke_height", tr("set_height"),
                                t$height, min = 30, step = 10)),
-        column(6, numericInput("trke_max", tr("set_max_auto"),
-                               if (is.null(t$ymax)) 0 else t$ymax, min = 0))),
+        # no min= on the two scale fields: a subtraction / log-ratio track needs
+        # to be able to sit below zero.
+        # NULL (not NA) so the field renders truly empty when the scale is auto
+        column(4, numericInput("trke_min", tr("set_min_auto"),
+                               if (is.null(t$ymin) || !is.finite(t$ymin)) NULL else t$ymin)),
+        column(4, numericInput("trke_max", tr("set_max_auto"),
+                               if (is.null(t$ymax)) 0 else t$ymax))),
       if (is_bw) fluidRow(
         column(6, selectInput("trke_agg", tr("set_agg"),
                     choices = setNames(c("mean", "max"),
@@ -2683,6 +2692,9 @@ server <- function(input, output, session) {
     if (length(hv) == 1 && is.finite(hv) && hv >= 20) t$height <- hv
     mv <- suppressWarnings(as.numeric(input$trke_max))
     if (length(mv) == 1 && is.finite(mv) && mv >= 0) t$ymax <- mv
+    # blank (or non-numeric) = auto; anything finite fixes the bottom, negatives included
+    mnv <- suppressWarnings(as.numeric(input$trke_min))
+    t$ymin <- if (length(mnv) == 1 && is.finite(mnv)) mnv else NA_real_
     if (identical(t$type, "bigWig")) {
       av <- input$trke_agg
       if (!is.null(av) && av %in% c("mean", "max")) t$agg <- av
@@ -3478,7 +3490,7 @@ server <- function(input, output, session) {
     ht  <- suppressWarnings(as.numeric(height))
     if (length(ht) != 1 || !is.finite(ht) || ht < 20) ht <- 90
     rv$tracks[[as.character(id)]] <- list(id = id, name = nm, path = lp,
-      type = ty, color = col, height = ht, ymax = 0,
+      type = ty, color = col, height = ht, ymax = 0, ymin = NA_real_,
       agg = "mean", bins = rv$trk_bins)   # per-track resolution (editable)
     rv$trk_msg <- paste0(sprintf(tr("msg_added_track"), nm, ty),
                          if (nzchar(chrom_msg)) paste0("\n", chrom_msg) else "")
