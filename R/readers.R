@@ -332,9 +332,69 @@ read_hic_map <- function(path, chr, start = 1, end = NA, resolution = 10000,
                 unit, resolution)
 }
 
+# ---------------------------------------------------------------------------
+# match_chrom(): resolve a chromosome name against a file's own list.
+#
+# Returns the name AS THIS FILE SPELLS IT, or NA_character_ when the file has
+# no such chromosome. Matching is the tolerant kind .hic_chr_index() does - a
+# "chr" prefix on one side only is still the same chromosome (chr2 == 2) - and
+# case is ignored on top of that, so a name carried over from another file
+# ("CHR2", "chr2") still finds "2".
+#
+# Every caller that turns a user-supplied / carried-over chromosome name into
+# something it will read should go through this first: the raw `==` comparison
+# it replaces silently produced a zero-length answer, which then blew up
+# somewhere else entirely (a vapply(..., numeric(1)) several frames up).
+# ---------------------------------------------------------------------------
+match_chrom <- function(nm, names_all) {
+  nm <- as.character(nm)[1]
+  names_all <- as.character(names_all)
+  if (length(nm) == 0 || is.na(nm) || !nzchar(nm) || !length(names_all))
+    return(NA_character_)
+  i <- match(nm, names_all)                     # exact spelling wins
+  if (is.na(i)) {
+    lo   <- tolower(nm)
+    keys <- unique(c(lo, if (startsWith(lo, "chr")) sub("^chr", "", lo)
+                         else paste0("chr", lo)))
+    i <- which(tolower(names_all) %in% keys)[1]
+  }
+  if (is.na(i)) NA_character_ else names_all[i]
+}
+
+# The aggregate pseudo-chromosome (juicer's "All" / "Assembly", index 0) carries
+# the WHOLE GENOME's length. It is not a chromosome anyone wants to look at, and
+# it has to be dropped before any max() over lengths or it would win every time.
+chrom_is_real <- function(nm)
+  !tolower(as.character(nm)) %in% c("all", "assembly")
+
+# ---------------------------------------------------------------------------
+# longest_chrom(): the chromosome to open when the caller's choice is not in
+# this file - the longest real one.
+#
+# Length rather than file order: a .hic that lists scaffolds, chrM or an
+# unplaced contig first would otherwise open on a few hundred kb of nothing.
+# The longest chromosome is always a real, informative one, and finding it
+# costs no extra I/O (the chromosome table has already been read).
+# ---------------------------------------------------------------------------
+longest_chrom <- function(info) {
+  if (is.null(info) || is.null(info$name) || !length(info$name))
+    return(NA_character_)
+  keep <- chrom_is_real(info$name)
+  if (!any(keep)) return(NA_character_)
+  nm <- as.character(info$name)[keep]
+  ln <- suppressWarnings(as.numeric(info$length))[keep]
+  if (!any(is.finite(ln))) return(nm[1])
+  nm[which.max(ln)]
+}
+
+# Length of one chromosome. NA_real_ - not numeric(0) - when the file does not
+# have it, so a caller that forgets to check fails on a value it can see rather
+# than on a zero-length vector.
 .hic_chrom_length <- function(path, chr) {
   info <- hic_chroms(path)
-  as.numeric(info$length[info$name == chr])
+  nm   <- match_chrom(chr, info$name)
+  if (is.na(nm)) return(NA_real_)
+  as.numeric(info$length[info$name == nm])[1]
 }
 
 # ---------------------------------------------------------------------------

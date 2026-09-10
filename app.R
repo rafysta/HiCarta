@@ -846,7 +846,11 @@ ui <- function(request) {
     div(id = "side_col", class = "col-sm-3",
       tags$form(class = "well", role = "complementary",
       conditionalPanel("input.nav == 'Region'",
-        selectInput("chr", tr("region_chr"), c("I", "II", "III"), "II"),
+        # empty until a file is opened: both selectors are filled from the
+        # file itself (set_chrom_choices), and a hard-coded start-up value is
+        # exactly what used to be carried into the first open of an unrelated
+        # genome
+        selectInput("chr", tr("region_chr"), choices = character(0)),
         # the whole-genome view has no region to type: both axes are always the
         # entire genome, so the range boxes and the Y selector step aside
         conditionalPanel("input.chr != '__genome__'",
@@ -1855,14 +1859,49 @@ server <- function(input, output, session) {
       genome_mode <- identical(chr, GENOME_KEY) || identical(chr_y, GENOME_KEY)
       gen <- NULL
       note <- ""
+      reset_range <- FALSE
       if (genome_mode) {
         if (is.null(file_info)) stop(tr("msg_no_genome"))
         gen <- make_genome(file_info$name, file_info$length)
         if (is.null(gen) || length(gen$name) < 2) stop(tr("msg_no_genome"))
         chr <- GENOME_KEY; chr_y <- GENOME_KEY
-      } else if (length(file_chroms) && !(chr_y %in% file_chroms)) {
-        note  <- sprintf(tr("msg_no_chr_y"), chr_y)
-        chr_y <- chr
+      } else if (length(file_chroms)) {
+        # Both axes have to name a chromosome THIS file actually has. Neither
+        # is guaranteed to: the selectors still hold whatever was open before
+        # (or nothing at all on the very first open), and until here nothing
+        # had checked them against the file being opened - .hic_chrom_length()
+        # would simply hand back a zero-length vector and the vapply below
+        # would die with "values must be length 1 ... result is length 0".
+        #
+        # A name that IS present is always kept, only re-spelled the file's way
+        # (chr2 -> 2): bookmarks and session restore pass an explicit
+        # chromosome and must land on it. A name that is absent falls back to
+        # the longest chromosome in the file, with a note saying so.
+        was_cis <- identical(chr_y, chr)
+        hit <- match_chrom(chr, file_chroms)
+        if (is.na(hit)) {
+          fb <- longest_chrom(file_info)
+          if (is.na(fb)) stop(tr("msg_no_chrom"))
+          # nothing was really requested on the very first open (the selector
+          # is empty until a file fills it) - no need to report a miss
+          if (!is.null(chr) && length(chr) == 1 && !is.na(chr) && nzchar(chr))
+            note <- sprintf(tr("msg_no_chr_x"), chr, fb)
+          chr  <- fb
+          if (was_cis) chr_y <- fb
+          # the inherited window describes a DIFFERENT chromosome (and the
+          # start-up default would open a 1 Mb keyhole on a 249 Mb one), so the
+          # range is no longer meaningful either - see below
+          reset_range <- TRUE
+        } else {
+          chr <- hit
+        }
+        hit_y <- match_chrom(chr_y, file_chroms)
+        if (is.na(hit_y)) {
+          note  <- trimws(paste(note, sprintf(tr("msg_no_chr_y"), chr_y)))
+          chr_y <- chr
+        } else {
+          chr_y <- hit_y
+        }
       }
       trans <- !identical(chr, chr_y)
 
@@ -1879,6 +1918,16 @@ server <- function(input, output, session) {
         stop(sprintf(tr("msg_virt_chrlen"), chr))
       chrlen   <- lens[1]      # X axis (columns) - the axis the tracks follow
       chrlen_y <- lens_y[1]    # Y axis (rows); equal to chrlen on a cis map
+      # We landed on a fallback chromosome, so any range we were handed belongs
+      # to a different one. Open on the whole chromosome - the natural first
+      # view of a contact map - and write it back into the Region boxes so the
+      # numbers on screen match what is drawn.
+      if (isTRUE(reset_range) && is.finite(chrlen)) {
+        start  <- 1; end  <- chrlen
+        ystart <- 1; yend <- chrlen_y
+        updateNumericInput(session, "start", value = 1)
+        updateNumericInput(session, "end",   value = round(chrlen))
+      }
       # available normalizations: the file's own list; for a virtual dataset
       # the INTERSECTION across files (a norm must be readable everywhere).
       # Picked BEFORE the resolutions, because which resolutions are usable
@@ -2221,10 +2270,13 @@ server <- function(input, output, session) {
               else list(list(rv$chr, rv$chrlen), list(chry_now, leny_now))
       for (ax in axes) {
         cc <- ax[[1]]; ll <- ax[[2]]
-        if (!(cc %in% chroms$name)) {
+        # tolerant match: A spelling it "chr1" and B spelling it "1" is the
+        # same chromosome, and refusing the comparison over that would be wrong
+        cc_b <- match_chrom(cc, chroms$name)
+        if (is.na(cc_b)) {
           clear_cmp(msg = sprintf(tr("msg_cmp_no_chrom"), cc)); return(invisible(NULL))
         }
-        len_b <- as.numeric(chroms$length[chroms$name == cc])[1]
+        len_b <- as.numeric(chroms$length[chroms$name == cc_b])[1]
         if (!isTRUE(all.equal(as.numeric(len_b), as.numeric(ll)))) {
           clear_cmp(msg = sprintf(tr("msg_cmp_len"), cc,
                                   format(ll, big.mark = ","),
@@ -2541,8 +2593,7 @@ server <- function(input, output, session) {
     # remember the source so goto / session save keep working after restore
     rv$cat_src <- hic_src
     if (!is.null(hic$chr))
-      updateSelectInput(session, "chr", choices = unique(c(hic$chr, "I", "II", "III")),
-                        selected = hic$chr)
+      updateSelectInput(session, "chr", choices = hic$chr, selected = hic$chr)
     if (!is.null(reg$start)) updateNumericInput(session, "start", value = reg$start)
     if (!is.null(reg$end))   updateNumericInput(session, "end",   value = reg$end)
     if (!is.null(d$color))   updateSelectInput(session, "color", selected = d$color)
