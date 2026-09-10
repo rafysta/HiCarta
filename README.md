@@ -3,7 +3,10 @@
 
 📖 **Documentation site: <https://rafysta.github.io/HiCarta/>**
 
-![](https://rafysta.github.io/HiCarta/images/overview.png)
+<img width="1914" height="907" alt="image" src="https://github.com/user-attachments/assets/f5cb2246-9798-4f29-b3a7-ce5e50ba103a" />
+
+[Watch the HiCarta demo video](https://youtu.be/seEpdNZGjwE)
+
 
 HiCarta lets you explore Hi-C contact maps like a web map: **drag to pan, scroll to
 zoom**. It streams only the tiles you are looking at, so it stays fast even on
