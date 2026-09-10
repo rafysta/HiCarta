@@ -2,7 +2,8 @@
 # borderstrength.R  -  Border Strength track (github.com/rafysta/BorderStrength)
 #
 # Input: a *_BS.txt with columns  chr, start, end, BS, BS.norm, boundary, TADid, TAD
-# (200 bp bins). We plot BS.norm as a filled area: positive = red, negative = blue,
+# (200 bp bins). A header line is expected; files without one are read by column
+# position instead. We plot BS.norm as a filled area: positive = red, negative = blue,
 # with a dashed vertical line at every boundary bin. Mirrors drawBW(type=
 # "BorderStrength") from hic_graph.R.
 #
@@ -13,11 +14,28 @@ suppressWarnings(suppressMessages({ library(data.table) }))
 
 BS_CACHE <- new.env(parent = emptyenv())
 
+# Canonical column order produced by BorderStrength.
+BS_COLS <- c("chr", "start", "end", "BS", "BS.norm", "boundary", "TADid", "TAD")
+
 read_bs <- function(path) {
   if (!is.null(BS_CACHE[[path]])) return(BS_CACHE[[path]])
   d <- data.table::fread(path, header = TRUE, na.strings = c("NA", "", "NaN"))
+
+  # Headerless file: header = TRUE ate the first data row as column names, so
+  # "BS.norm" is missing. Re-read without a header and name the columns by
+  # position instead.
+  if (!("BS.norm" %in% names(d))) {
+    d <- data.table::fread(path, header = FALSE, na.strings = c("NA", "", "NaN"))
+    if (ncol(d) < 5)
+      stop(sprintf("Border Strength file needs at least 5 columns (%s); got %d in %s",
+                   paste(BS_COLS[1:5], collapse = ", "), ncol(d), basename(path)))
+    n <- min(ncol(d), length(BS_COLS))
+    data.table::setnames(d, seq_len(n), BS_COLS[seq_len(n)])
+  }
+
   val <- suppressWarnings(as.numeric(trimws(as.character(d[["BS.norm"]]))))
-  bnd <- suppressWarnings(as.integer(d[["boundary"]]))
+  bnd <- if ("boundary" %in% names(d))
+    suppressWarnings(as.integer(d[["boundary"]])) else rep(0L, nrow(d))
   df <- data.frame(chr = as.character(d[["chr"]]),
                    start = as.numeric(d[["start"]]), end = as.numeric(d[["end"]]),
                    val = val, boundary = bnd, stringsAsFactors = FALSE)

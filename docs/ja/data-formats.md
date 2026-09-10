@@ -22,6 +22,8 @@ HiCarta はいくつかの形式を読み込みます。コンタクトマップ
 
 [BorderStrength](https://github.com/rafysta/BorderStrength) が出力します。列: `chr, start, end, BS, BS.norm, boundary, TADid, TAD`（200 bp ビン）。HiCarta は `BS.norm` を面として描画し（正は赤、負は青、基準線 0）、`boundary != 0` の位置に破線を引きます。
 
+列名のヘッダー行があることを想定していますが、ヘッダーのないファイルは列の順番（`chr, start, end, BS, BS.norm, …`）で読み込みます。ビンサイズは 200 bp に限らず、40 kb などでも構いません。
+
 ---
 
 ## hic200‑cpp の生マップ（`.txt.gz`）→ `.hic`

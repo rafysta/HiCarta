@@ -32,6 +32,10 @@ Produced by [BorderStrength](https://github.com/rafysta/BorderStrength). Columns
 `BS.norm` as an area (positive red, negative blue, baseline 0) with dashed lines
 where `boundary != 0`.
 
+A header line with those column names is expected. Files without one are read by
+column position (`chr, start, end, BS, BS.norm, ...`), so headerless output works
+too. The bin size is free — 200 bp, 40 kb, anything.
+
 ---
 
 ## hic200‑cpp raw maps (`.txt.gz`) → `.hic`
