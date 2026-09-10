@@ -396,16 +396,34 @@ draw_export_map <- function(m, chr, start, end,
       # The tracks are sized from the map, not from what is left over: their
       # heights are relative weights against map_weight, so holding that ratio
       # keeps the printed figure in the proportions the app was showing. If the
-      # stack does not fit the page, drop back to relative heights - asp = 1
-      # still gets the scale right, by centring the map in the row it gets.
+      # stack does not fit the page, the tracks give up height (below) so the
+      # map can keep the width of the page; only if that fails do the heights
+      # go relative - asp = 1 still gets the scale right, by centring the map
+      # in the row it gets.
       #
       # Sizing the map row exactly is also what puts the caption directly under
       # the picture: with a relative height the map row swallows the whole page
       # and, under equal scaling, the map floats in the middle of it.
-      th <- if (ntr > 0) eh * (hts[-1] / as.numeric(map_weight)) else numeric(0)
-      if (all(is.finite(th)) &&
-          sum(c(eh, th, cap_in)) <= graphics::par("din")[2] * 0.98)
-        hts <- graphics::lcm(c(eh, th) * 2.54)
+      th    <- if (ntr > 0) eh * (hts[-1] / as.numeric(map_weight)) else numeric(0)
+      avail <- graphics::par("din")[2] * 0.98 - cap_in
+      if (all(is.finite(th))) {
+        # Too tall for the page? Squeeze the TRACKS, not the map. The map is the
+        # only panel whose height also fixes its WIDTH (equal scale reads the
+        # row height back as the bp-per-inch it can afford), so shaving the map
+        # row is what makes the picture narrower than the tracks underneath it -
+        # exactly the mismatch this layout exists to avoid. Tracks only get
+        # shorter, never narrower. Below a legible floor we give up and let the
+        # heights go relative; the x-alignment further down then matches the
+        # tracks to whatever width the map ended up with.
+        if (ntr > 0 && sum(c(eh, th)) > avail && eh < avail) {
+          MIN_TRK <- 0.22                                   # inches, ~6 mm
+          sc <- (avail - eh) / sum(th)
+          th <- if (is.finite(sc) && sc > 0 && min(th) * sc >= MIN_TRK) th * sc
+                else rep(NA_real_, ntr)
+        }
+        if (all(is.finite(th)) && sum(c(eh, th)) <= avail)
+          hts <- graphics::lcm(c(eh, th) * 2.54)
+      }
     }
     if (ncap > 0) hts <- c(hts, graphics::lcm(cap_in * 2.54))
     rows <- c(1L, idx_trk, if (ncap > 0) idx_cap)
@@ -464,6 +482,44 @@ draw_export_map <- function(m, chr, start, end,
   .genome_grid()
   .split_marks()
   graphics::rect(start, yend, end, ystart)
+
+  # ---- x-alignment: every track spans exactly the map's printed width ------
+  # Under equal scaling (asp = 1) the map body cannot always fill the width of
+  # its cell: when its row is shorter than a full-width map would need, R widens
+  # the x RANGE instead and centres the image, so the picture ends up narrower
+  # than the tracks below it, which are drawn to the full cell width. Measure
+  # where the image actually landed (par("usr") is the panel's data range,
+  # par("plt") its share of the figure region) and turn the slack on each side
+  # into extra track margin, so the map and every track share one x scale on the
+  # page. With no slack this reproduces LEFT/RIGHT exactly, so the ordinary
+  # (non-equal-scale) export is untouched.
+  if (ntr > 0 || ncap > 0) {
+    u <- graphics::par("usr"); pl <- graphics::par("plt")
+    fg <- graphics::par("fig"); din <- graphics::par("din")
+    csi <- graphics::par("csi")
+    # inches per margin LINE, read back from the panel that was just drawn
+    # (mai is what R made of body_mar) rather than assumed to be csi, so the
+    # conversion below cannot drift from what the device actually does
+    lin <- if (body_mar[2] > 0) graphics::par("mai")[2] / body_mar[2] else csi
+    if (!is.finite(lin) || lin <= 0) lin <- csi
+    wspan <- u[2] - u[1]
+    if (is.finite(wspan) && wspan > 0 && lin > 0) {
+      fx   <- function(v) pl[1] + (v - u[1]) / wspan * (pl[2] - pl[1])
+      figW <- (fg[2] - fg[1]) * din[1]            # this column's width, inches
+      lo   <- fx(start); hi <- fx(end)
+      l    <- lo * figW / lin                     # image left edge, margin lines
+      r    <- (1 - hi) * figW / lin
+      if (all(is.finite(c(l, r))) && l >= 0 && r >= 0 &&
+          (hi - lo) * figW > 0.2) {               # a sliver of a map helps nobody
+        track_mar[2] <- l
+        track_mar[4] <- r
+        # the caption keeps its own right margin (it is text, not a picture, and
+        # shrinking it to a narrow map would make it unreadable), but its left
+        # edge still lines up with the map body
+        cap_mar[2] <- l
+      }
+    }
+  }
 
   # How tall the map ACTUALLY came out, as margins for the legend column.
   #

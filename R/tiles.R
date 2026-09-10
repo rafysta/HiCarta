@@ -79,6 +79,17 @@
 
 TILE_PX <- 256L
 
+# Reference bin size the value scale is expressed in. Contact counts scale with
+# bin AREA, so every tile scales vmin/vmax by (res/vref)^2 - and vref must stay
+# PUT while the user navigates, or the same "max value" would paint a different
+# map on a different chromosome. st$ovres (the overview bin size) is picked from
+# the chromosome's own length and therefore cannot serve as that reference; it
+# is only the fallback for state written before st$vref existed.
+.vref <- function(st) {
+  v <- st$vref
+  if (is.null(v) || length(v) != 1 || !is.finite(v) || v <= 0) st$ovres else v
+}
+
 choose_res <- function(bpp, res_asc) {
   res_asc[which.min(abs(log2(res_asc) - log2(bpp)))]
 }
@@ -384,7 +395,7 @@ render_tile <- function(st, z, x, y, src = "a") {
     vA <- vA * fA
     vB <- vB * bfac
 
-    f   <- (res / st$ovres)^2
+    f   <- (res / .vref(st))^2
     lim <- st$diffLim
     if (is.null(lim) || length(lim) != 1 || !is.finite(lim) || lim <= 0) lim <- 1
     if (identical(st$diffType, "sub")) {
@@ -436,7 +447,7 @@ render_tile <- function(st, z, x, y, src = "a") {
   vmx <- st$vmax; if (is.null(vmx) || length(vmx) != 1 || !is.finite(vmx) || vmx <= vmn)
     vmx <- suppressWarnings(max(val, na.rm = TRUE))
   if (!is.finite(vmx)) vmx <- vmn + 1
-  f <- (res / st$ovres)^2
+  f <- (res / .vref(st))^2
   cols <- values_to_colors(as.vector(val), st$color, vmn * f, vmx * f)
 
   # thin separator along the diagonal so the two halves are unmistakable

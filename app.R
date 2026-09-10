@@ -483,11 +483,22 @@ function(el, x) {
   // Show / hide the whole contact-map box. The map is hidden until a .hic is
   // opened so that tracks can be viewed on their own; revealing it needs an
   // invalidateSize() because Leaflet cannot measure a display:none container.
+  // The map is sized to fill the window only the FIRST time it appears. Every
+  // do_open() sends showMap, so calling autoSize() unconditionally threw away
+  // the height the user had chosen whenever a dataset was re-opened (a bookmark
+  // jump to another chromosome, a catalog open, a genome switch): autoSize()
+  // refills the window ignoring the tracks and pushes its own value back into
+  // the map-height box. The height now changes only on the first reveal, or
+  // when the user asks for it (Apply / Fit to window / Auto adjust).
+  var mapEverShown = false;
   Shiny.addCustomMessageHandler('showMap', function(msg){
     var box = document.getElementById('mapbox');
     if(!box) return;
     box.style.display = msg.show ? '' : 'none';
-    if(msg.show){ map.invalidateSize(); autoSize(); }
+    if(!msg.show) return;
+    map.invalidateSize();
+    if(!mapEverShown){ mapEverShown = true; autoSize(); }
+    else { report(); drawRulers(); }
   });
 
   Shiny.addCustomMessageHandler('initTiles', function(msg){
@@ -736,6 +747,31 @@ ui <- function(request) {
     ".hid-swatches .sw.sel{border-color:#111; box-shadow:0 0 0 1px #111}",
     ".pan-pad .btn{width:44px; padding:4px 0; font-size:14px}",
     ".pan-pad .btn.home{color:#337ab7}",
+    # ---- bookmarks (own top-menu panel) ----
+    # quick-save row in the Navigate panel: name box stretches, star button
+    # keeps its natural width (same flex pattern as #cat_url_row)
+    "#bm_quick_row,#bm_quick_row2{display:flex; gap:6px; align-items:flex-end}",
+    "#bm_quick_row .form-group,#bm_quick_row2 .form-group{margin-bottom:0}",
+    "#bm_quick_row .bm-quick-input,#bm_quick_row2 .bm-quick-input{",
+    "  flex:1 1 auto; min-width:0}",
+    "#bm_quick_row .shiny-input-container,",
+    "#bm_quick_row2 .shiny-input-container{width:100%}",
+    "#bm_quick_row .form-control,#bm_quick_row2 .form-control{width:100%}",
+    "#bm_quick_row .btn,#bm_quick_row2 .btn{flex:0 0 auto; white-space:nowrap}",
+    # the list itself SCROLLS inside a fixed box, so however many bookmarks
+    # there are the panel never grows past the window and pushes the map down
+    ".bm-list{max-height:calc(100vh - 470px); min-height:120px;",
+    "  overflow-y:auto; overflow-x:hidden; border:1px solid #ddd;",
+    "  border-radius:4px; background:#fff; padding:5px 6px}",
+    ".bm-item{display:flex; align-items:center; gap:4px; margin-bottom:3px}",
+    ".bm-item .bm-go{flex:1 1 auto; min-width:0; text-align:left;",
+    "  overflow:hidden; padding:4px 8px; line-height:1.25}",
+    ".bm-item .bm-go .nm{display:block; overflow:hidden;",
+    "  text-overflow:ellipsis; white-space:nowrap}",
+    ".bm-item .bm-go .rg{display:block; font-size:10px; color:#888;",
+    "  overflow:hidden; text-overflow:ellipsis; white-space:nowrap}",
+    ".bm-item .bm-del{flex:0 0 auto}",
+    ".bm-count{font-size:11px; color:#777; margin:4px 2px 2px}",
     # ---- collapsible side panel ----
     # The toggle button always stays visible as the left-most item of #topnav;
     # collapsing hides the rest of the menu and the whole side column, and lets
@@ -788,6 +824,9 @@ ui <- function(request) {
         HTML("&#128194; "), tr("nav_data")),
       tabsetPanel(id = "nav", type = "pills", selected = "Region",
         tabPanel(tr("nav_region"),  value = "Region"),
+        # bookmarks get their own pill: the list is often long, and mixing it
+        # into Navigate pushed Go-to / the pan pad off the top of the window
+        tabPanel(tr("nav_bookmark"), value = "Bookmark"),
         tabPanel(tr("nav_display"), value = "Display"),
         tabPanel(tr("nav_print"),   value = "Print"),
         tabPanel(tr("nav_setting"), value = "Setting"),
@@ -897,15 +936,36 @@ ui <- function(request) {
             actionButton("zoom_out", HTML(paste0("&#8722; ", tr("region_zoom_out"))),
                          class = "btn-sm", style = "width:auto; padding:4px 10px;"))),
         hr(),
-        # bookmarks: star the current view, jump back to it later
+        # Only the "star this view" control stays here, so saving while you
+        # navigate is still one click. The list, the filter and the Excel
+        # exchange live in the Bookmark panel below.
         tags$label(tr("bm_title")),
-        textInput("bm_name", NULL, placeholder = tr("bm_name_ph")),
-        actionButton("bm_add", HTML(paste0("&#9733; ", tr("bm_add"))),
-                     class = "btn-sm btn-primary"),
-        uiOutput("bookmark_list"),
+        div(id = "bm_quick_row",
+          div(class = "bm-quick-input",
+              textInput("bm_name", NULL, placeholder = tr("bm_name_ph"))),
+          actionButton("bm_add", HTML(paste0("&#9733; ", tr("bm_add"))),
+                       class = "btn-sm btn-primary"))),
+
+      # ---- Bookmark panel: the list, on its own, scrollable ---------------
+      # Kept apart from Go-to / the pan pad so that a long list can never make
+      # the side panel taller than the window: the list box itself scrolls.
+      conditionalPanel("input.nav == 'Bookmark'",
+        helpText(tr("bm_panel_desc")),
+        div(id = "bm_quick_row2", class = "bm-quick",
+          div(class = "bm-quick-input",
+              textInput("bm_name2", NULL, placeholder = tr("bm_name_ph"))),
+          actionButton("bm_add2", HTML(paste0("&#9733; ", tr("bm_add"))),
+                       class = "btn-sm btn-primary")),
+        hr(),
+        # name / chromosome filter: with many bookmarks, typing beats scrolling
+        textInput("bm_filter", NULL, placeholder = tr("bm_filter_ph")),
+        uiOutput("bm_count"),
+        div(class = "bm-list", uiOutput("bookmark_list")),
         # bookmark exchange: export the current list as .xlsx, import APPENDS
         # (spec §8 — data reference + region + display settings travel along)
-        div(style = "margin-top:8px;",
+        hr(),
+        tags$label(tr("bm_exchange")),
+        div(style = "margin-top:6px;",
           downloadButton("bm_save", tr("bm_save"), class = "btn-sm")),
         div(style = "margin-top:6px;",
           fileInput("bm_file", tr("bm_load"), accept = ".xlsx"))),
@@ -1019,6 +1079,10 @@ server <- function(input, output, session) {
                        cat_filters = list(), trk_pending = NULL,
                        cat_open_id = NULL, cat_open_entry = NULL,
                        ov = NULL, ov_res = NULL, chr = NULL, chrlen = NULL,
+                       # open_src: the dataset currently open (paths joined by
+                       #           "|") - do_open() compares against it to tell
+                       #           navigation from a genuinely new dataset
+                       open_src = NULL,
                        tileURL = NULL, tracks = list(), trk_seq = 0, trk_bins = 1000,
                        trk_msg = "", sample_name = NULL, restore_vmax = NULL,
                        bookmarks = list(), bm_seq = 0L,
@@ -1574,7 +1638,26 @@ server <- function(input, output, session) {
     # seed the scale from a restored session value if present, else auto (p99)
     v0 <- if (!is.null(rv$restore_vmax) && is.finite(rv$restore_vmax) && rv$restore_vmax > 0)
             rv$restore_vmax else p99
+    # A value carried over from the previous view can sit outside THIS region's
+    # data range. The slider would silently clamp it to its own maximum and
+    # (through link_sliders) write the clamped number back into the numeric box,
+    # undoing the very setting we are trying to keep - so widen the track
+    # instead. Steps are recomputed for the widened range.
+    if (is.finite(v0)) {
+      dmax <- max(dmax, v0); dmin <- min(dmin, v0)
+      steplin <- signif((dmax - dmin) / 200, 2)
+      if (!is.finite(steplin) || steplin <= 0) steplin <- 1
+      if (v0 > 0) {
+        logmax <- max(logmax, log10(v0)); logmin <- min(logmin, log10(v0))
+        steplog <- (logmax - logmin) / 200
+        if (!is.finite(steplog) || steplog <= 0) steplog <- 0.01
+      }
+    }
     lvmax <- if (v0 > 0) log10(v0) else logmin
+    # the two sliders snap their handle to this grid; link_sliders() needs the
+    # step sizes to tell a rebuild's snap from a real drag (see below)
+    st$scale_step_lin <- steplin
+    st$scale_step_log <- steplog
     tagList(
       tags$label(tr("disp_maxval")),
       sliderInput("vmax", tr("disp_linear"), dmin, dmax, v0, step = steplin),
@@ -1588,15 +1671,37 @@ server <- function(input, output, session) {
   # log slider -> numeric). The numeric is never pushed back to the sliders,
   # which avoids the slider<->numeric feedback loop (stepped log values kept
   # bouncing the value). The numeric box is the source of truth for redraw.
+  #
+  # Rebuilds are the awkward case. scale_controls is re-rendered on every Open,
+  # and each slider then reports its handle SNAPPED to its own step grid - a
+  # grid that is derived from the region's data range and so is different on
+  # every chromosome. Writing that snapped number back would quietly move a
+  # value the user (or a carried-over scale) had set, by up to half a step,
+  # every single time the map is re-opened. A real drag always moves the handle
+  # by at least one step and a snap by at most half of one, so anything within
+  # three quarters of a step of the numeric box is treated as a snap and
+  # ignored.
   link_sliders <- function(num, lin, lg) {
+    snap_lin <- function() {
+      st0 <- st$scale_step_lin
+      if (is.null(st0) || length(st0) != 1 || !is.finite(st0)) 0 else st0 * 0.75
+    }
+    snap_log <- function() {
+      st0 <- st$scale_step_log
+      if (is.null(st0) || length(st0) != 1 || !is.finite(st0)) 0 else st0 * 0.75
+    }
     observeEvent(input[[lin]], {
       v <- input[[lin]]; if (is.null(v) || is.na(v)) return()
-      if (is.null(input[[num]]) || !isTRUE(all.equal(v, input[[num]])))
+      cur <- input[[num]]
+      if (is.null(cur) || is.na(cur) || abs(v - cur) > snap_lin())
         updateNumericInput(session, num, value = v)
     }, ignoreInit = TRUE)
     observeEvent(input[[lg]], {
       lv <- input[[lg]]; if (is.null(lv) || is.na(lv)) return()
-      updateNumericInput(session, num, value = signif(10^lv, 6))
+      cur <- input[[num]]
+      if (is.null(cur) || is.na(cur) || cur <= 0 ||
+          abs(log10(cur) - lv) > snap_log())
+        updateNumericInput(session, num, value = signif(10^lv, 6))
     }, ignoreInit = TRUE)
   }
   link_sliders("vmax_num", "vmax", "vmax_log")
@@ -1817,7 +1922,8 @@ server <- function(input, output, session) {
                       ystart = NULL, yend = NULL,
                       chr_y = input$chr_y,
                       norm = NULL, color = input$color,
-                      vmax = NULL, name = NULL, fixed_res = NULL) {
+                      vmax = NULL, name = NULL, fixed_res = NULL,
+                      vref_in = NULL) {
     if (is.null(src)) { rv$msg <- tr("msg_pick_src"); return() }
     tryCatch({
       chr_y <- resolve_chr_y(chr_y, chr)
@@ -1829,6 +1935,13 @@ server <- function(input, output, session) {
       clear_cmp(restore_res = FALSE)
       srcs <- src[nzchar(src)]
       virt <- length(srcs) > 1
+      # Re-opening the SAME dataset - a bookmark jump to another chromosome, a
+      # Region change, a genome/trans switch - is NAVIGATION, not a new picture:
+      # the value scale, its reference bin size and the resolution mode are all
+      # carried over so the map keeps looking the way the user set it up. Only a
+      # genuinely different dataset starts from the automatic scale again.
+      keep_display <- isTRUE(rv$has_hic) &&
+        identical(paste(srcs, collapse = "|"), rv$open_src %||% "")
       # remote URLs are downloaded once and read locally; local paths pass through
       withProgress(message = tr("prog_cache_hic"), value = 0.3, {
         paths <- vapply(srcs, function(s)
@@ -2003,15 +2116,42 @@ server <- function(input, output, session) {
       rv$trans <- trans
       rv$genome <- gen                             # NULL unless genome-wide
       rv$open_key <- paste(paste(srcs, collapse = "|"), chr, chr_y)
+      rv$open_src <- paste(srcs, collapse = "|")   # for keep_display above
       # human-readable name of the sample now on screen: local file -> basename;
       # menu dataset -> "sample label / dataset label" looked up in the menu.
       rv$sample_name <- {
         if (!is.null(name) && nzchar(name)) name          # from the catalog
         else basename(srcs[1])
       }
+      # Reference bin size the value scale is expressed in. Every tile scales
+      # vmin/vmax by (res/vref)^2, so one "max value" means one brightness
+      # whatever resolution is on screen. The OVERVIEW resolution cannot serve
+      # as that reference across chromosomes: it is chosen from the chromosome's
+      # own length, so jumping to a shorter or longer chromosome changed it and
+      # the very same number then painted a visibly different map. The reference
+      # of the dataset already open is therefore kept; a new dataset starts one.
+      # vref_in: a saved session hands back the reference its vmax was written
+      # against, so a restored map is as bright as the one that was saved.
+      vref <- if (!is.null(vref_in) && length(vref_in) == 1 &&
+                  is.finite(vref_in) && vref_in > 0) as.numeric(vref_in)
+              else if (keep_display && !is.null(st$vref) &&
+                  length(st$vref) == 1 && is.finite(st$vref) && st$vref > 0)
+                st$vref else ovres
+      kref <- (vref / ovres)^2          # overview units -> reference units
       vals <- as.numeric(rv$ov); vals <- vals[is.finite(vals)]
+      vals <- vals * kref
       p99  <- auto_vmax(vals)
-      rv$restore_vmax <- vmax     # seeds the value-scale UI (NULL = auto p99)
+      # An explicit vmax (catalog / session restore) wins; otherwise a
+      # same-dataset re-open keeps the scale that is on screen and only a new
+      # dataset falls back to the automatic 99th percentile.
+      cur_vmax <- if (keep_display) suppressWarnings(as.numeric(st$vmax))
+                  else NA_real_
+      vmax_eff <- if (!is.null(vmax) && length(vmax) == 1 && is.finite(vmax) &&
+                      vmax > 0) as.numeric(vmax)
+                  else if (length(cur_vmax) == 1 && is.finite(cur_vmax) &&
+                           cur_vmax > 0) cur_vmax
+                  else NULL
+      rv$restore_vmax <- vmax_eff   # seeds the value-scale UI (NULL = auto p99)
       rv$dmin <- min(vals); rv$dmax <- max(vals)
       pos <- vals[vals > 0]; rv$dfloor <- if (length(pos)) min(pos) else 1
       rv$p99 <- p99
@@ -2047,8 +2187,9 @@ server <- function(input, output, session) {
       set_norm_choices(norms_avail, norm)
       st$color <- color
       st$baseRes <- baseRes; st$maxZoom <- maxZoom; st$ovres <- ovres
+      st$vref <- vref                    # the scale's fixed reference bin size
       st$vmin <- 0
-      st$vmax <- if (!is.null(vmax) && is.finite(vmax) && vmax > 0) vmax else p99
+      st$vmax <- if (!is.null(vmax_eff)) vmax_eff else p99
       st$blank <- NULL
       # map-resolution mode: auto on each Open, unless the catalog pinned one
       # (set_resolution -> fixed_res). The slider UI is rebuilt (rv$res_all
@@ -2057,6 +2198,14 @@ server <- function(input, output, session) {
       if (!is.null(fixed_res) && is.finite(fixed_res) && fixed_res > 0) {
         st$autoRes  <- FALSE
         st$fixedRes <- res_all[which.min(abs(res_all - fixed_res))]
+        rv$res_prog <- TRUE
+        updateCheckboxInput(session, "map_res_auto", value = FALSE)
+      } else if (keep_display && isFALSE(st$autoRes) && !is.null(st$fixedRes) &&
+                 length(st$fixedRes) == 1 && is.finite(st$fixedRes)) {
+        # same dataset: stay on the resolution the user pinned (snapped to the
+        # ladder this chromosome actually offers)
+        st$autoRes  <- FALSE
+        st$fixedRes <- res_all[which.min(abs(res_all - st$fixedRes))]
         rv$res_prog <- TRUE
         updateCheckboxInput(session, "map_res_auto", value = FALSE)
       } else {
@@ -2357,9 +2506,20 @@ server <- function(input, output, session) {
         s1 <- q99(abs(as.numeric(rv$ov)))
         if (is.finite(s1) && s1 > 0) lim_sub <- signif(s1, 3)
       }
-      rv$diff_eps_auto <- signif(eps0, 4)
+      # The difference map is drawn with the same reference bin size as the
+      # single-sample scale (st$vref): the tiles scale eps and the subtraction
+      # limit by (res/vref)^2. Both were just measured on the overview, so they
+      # are converted into reference units here. The log2 limit is
+      # dimensionless and needs no conversion.
+      kb <- {
+        vr <- st$vref
+        if (!is.null(vr) && length(vr) == 1 && is.finite(vr) && vr > 0 &&
+            !is.null(rv$ov_res) && is.finite(rv$ov_res) && rv$ov_res > 0)
+          (vr / rv$ov_res)^2 else 1
+      }
+      rv$diff_eps_auto <- signif(eps0 * kb, 4)
       rv$diff_lim_log2 <- lim_log2
-      rv$diff_lim_sub  <- lim_sub
+      rv$diff_lim_sub  <- signif(lim_sub * kb, 3)
 
       rv$ov_b <- ov_b; rv$ov_b_res <- ovres_b
       rv$path_b <- path; rv$norm_b <- norm; rv$src_b <- src
@@ -2538,6 +2698,9 @@ server <- function(input, output, session) {
          compare = cmp,
          region = region,
          display = list(color = input$color, vmax = input$vmax_num,
+                        # the bin size vmax is expressed at - without it a
+                        # restored map could come back at another brightness
+                        vref = st$vref,
                         map_height = input$map_height, trk_bins = rv$trk_bins),
          tracks = tracks, bookmarks = bookmarks)
   }
@@ -2612,7 +2775,8 @@ server <- function(input, output, session) {
             ystart = reg$ystart %||% reg$start %||% 1,
             yend = reg$yend %||% reg$end %||% 1e12,
             norm = hic$normalization %||% "NONE",
-            color = d$color %||% input$color, vmax = d$vmax)
+            color = d$color %||% input$color, vmax = d$vmax,
+            vref_in = d$vref)
     # restore the comparison sample and its settings (the defaults below are read
     # by apply_cmp()/cmp_controls before the Display widgets exist)
     if (!is.null(cmp) && !is.null(cmp$src) && nzchar(cmp$src)) {
@@ -3021,7 +3185,10 @@ server <- function(input, output, session) {
   })
 
   # ---- bookmarks : star the current view, jump back to it later ----
-  observeEvent(input$bm_add, {
+  # Two buttons feed this: the quick star in Navigate and the one in the
+  # Bookmark panel. Each has its own name box (ids must be unique), so the
+  # capture itself lives in one function both observers call.
+  add_bookmark <- function(nm_in) {
     if (is.null(rv$chr)) { rv$msg <- tr("msg_need_data_first"); return() }
     vw <- view_range(); if (is.null(vw)) return()
     x0 <- round(max(1, vw$west)); x1 <- round(vw$east)
@@ -3031,7 +3198,7 @@ server <- function(input, output, session) {
     y0 <- if (isTRUE(rv$has_hic) && !is.null(v)) round(max(1, v$north)) else x0
     y1 <- if (isTRUE(rv$has_hic) && !is.null(v)) round(v$south)        else x1
     rv$bm_seq <- rv$bm_seq + 1L; id <- rv$bm_seq
-    nm <- if (!is.null(input$bm_name) && nzchar(input$bm_name)) input$bm_name
+    nm <- if (!is.null(nm_in) && nzchar(nm_in)) nm_in
           else if (!is.null(rv$genome)) tr("region_chr_all")
           else sprintf("%s:%s-%s", rv$chr, format(x0, big.mark = ","),
                        format(x1, big.mark = ","))
@@ -3049,8 +3216,11 @@ server <- function(input, output, session) {
     rv$bookmarks[[as.character(id)]] <- c(
       list(id = id, name = nm, chr = rv$chr, chr_y = rv$chr_y %||% rv$chr,
            x0 = x0, x1 = x1, y0 = y0, y1 = y1, comment = ""), dat)
-    updateTextInput(session, "bm_name", value = "")
-  })
+    updateTextInput(session, "bm_name",  value = "")
+    updateTextInput(session, "bm_name2", value = "")
+  }
+  observeEvent(input$bm_add,  add_bookmark(input$bm_name))
+  observeEvent(input$bm_add2, add_bookmark(input$bm_name2))
 
   # Click a bookmark. Same data + same chromosome -> smooth pan; anything else
   # re-opens: the bookmarked dataset (resolved through the CURRENT catalog by
@@ -3102,11 +3272,19 @@ server <- function(input, output, session) {
     if (length(bsrc) > 0) rv$cat_src <- bsrc
     bres <- suppressWarnings(as.numeric(b$resolution %||% NA))
     bvmx <- suppressWarnings(as.numeric(b$vmax %||% NA))
+    # Jumping inside the DATASET THAT IS ALREADY OPEN is navigation: the map
+    # keeps the colour scale, palette and resolution mode the user has set, so
+    # every stop on a tour is drawn in the same style. The bookmark's own saved
+    # display settings are only applied when it takes us to a different dataset,
+    # where the values on screen would mean nothing.
     do_open(src = src, chr = b$chr, chr_y = bchr_y,
             start = b$x0, end = b$x1, ystart = b$y0, yend = b$y1,
-            norm = if (!is.null(b$norm) && nzchar(b$norm %||% "")) b$norm else st$norm,
-            vmax = if (length(bvmx) == 1 && is.finite(bvmx) && bvmx > 0) bvmx else NULL,
-            fixed_res = if (length(bres) == 1 && is.finite(bres) && bres > 0) bres else NULL)
+            norm = if (!same_data && !is.null(b$norm) && nzchar(b$norm %||% "")) b$norm
+                   else st$norm,
+            vmax = if (!same_data && length(bvmx) == 1 && is.finite(bvmx) &&
+                       bvmx > 0) bvmx else NULL,
+            fixed_res = if (!same_data && length(bres) == 1 && is.finite(bres) &&
+                            bres > 0) bres else NULL)
   })
   observeEvent(input$bm_del, { rv$bookmarks[[as.character(input$bm_del)]] <- NULL })
 
@@ -3143,17 +3321,50 @@ server <- function(input, output, session) {
         type = "warning", duration = 10)
   })
 
+  # one-line "where does this bookmark point" caption under its name
+  bm_region_label <- function(b) {
+    if (identical(b$chr, "__genome__")) return(tr("region_chr_all"))
+    cy <- b$chr_y %||% b$chr
+    if (length(cy) != 1 || is.na(cy) || !nzchar(as.character(cy))) cy <- b$chr
+    xr <- sprintf("%s:%s-%s", b$chr, format(b$x0, big.mark = ","),
+                  format(b$x1, big.mark = ","))
+    # a trans view names both axes; a cis one needs only the single range
+    if (!identical(as.character(cy), as.character(b$chr)))
+      sprintf("%s \u00d7 %s:%s-%s", xr, cy, format(b$y0, big.mark = ","),
+              format(b$y1, big.mark = ","))
+    else xr
+  }
+
+  # name / chromosome filter, applied to the list and the counter alike
+  bm_visible <- reactive({
+    bs <- rv$bookmarks
+    q  <- trimws(input$bm_filter %||% "")
+    if (!nzchar(q)) return(bs)
+    keep <- vapply(bs, function(b) {
+      hay <- tolower(paste(b$name %||% "", b$chr %||% "", b$chr_y %||% ""))
+      grepl(tolower(q), hay, fixed = TRUE)
+    }, logical(1))
+    bs[keep]
+  })
+
+  output$bm_count <- renderUI({
+    n <- length(rv$bookmarks)
+    if (n == 0) return(NULL)
+    div(class = "bm-count", sprintf(tr("bm_count"), length(bm_visible()), n))
+  })
+
   output$bookmark_list <- renderUI({
     if (length(rv$bookmarks) == 0) return(helpText(tr("bm_none")))
-    do.call(tagList, lapply(rv$bookmarks, function(b)
-      div(style = "display:flex; align-items:center; gap:4px; margin-bottom:3px;",
-        tags$button(type = "button", class = "btn btn-sm btn-default",
-          style = paste0("flex:1; text-align:left; overflow:hidden;",
-                         "text-overflow:ellipsis; white-space:nowrap;"),
-          title = b$name,
+    vis <- bm_visible()
+    if (length(vis) == 0) return(helpText(tr("bm_no_match")))
+    do.call(tagList, lapply(vis, function(b)
+      div(class = "bm-item",
+        tags$button(type = "button", class = "btn btn-sm btn-default bm-go",
+          title = paste0(b$name, " \u2014 ", bm_region_label(b)),
           onclick = sprintf("Shiny.setInputValue('bm_goto','%s',{priority:'event'});", b$id),
-          b$name),
-        tags$button(type = "button", class = "btn btn-sm", title = tr("bm_delete"),
+          tags$span(class = "nm", b$name),
+          tags$span(class = "rg", bm_region_label(b))),
+        tags$button(type = "button", class = "btn btn-sm bm-del", title = tr("bm_delete"),
           onclick = sprintf("Shiny.setInputValue('bm_del','%s',{priority:'event'});", b$id),
           HTML("&#10005;")))))
   })
@@ -3234,7 +3445,13 @@ server <- function(input, output, session) {
         else compute_vfac(st$vpaths, res_by, rv$chr, nn, st$path, chry_now)
       st$norm <- nn
       rv$ov <- ov
+      # the value scale keeps its reference bin size (see do_open); only the
+      # numbers change, because a different normalization is a different unit
+      vref <- if (!is.null(st$vref) && length(st$vref) == 1 &&
+                  is.finite(st$vref) && st$vref > 0) st$vref else ovres
+      st$vref <- vref
       vals <- as.numeric(ov); vals <- vals[is.finite(vals)]
+      vals <- vals * (vref / ovres)^2
       p99  <- auto_vmax(vals)
       rv$restore_vmax <- NULL
       rv$dmin <- min(vals); rv$dmax <- max(vals)
@@ -3634,9 +3851,26 @@ server <- function(input, output, session) {
     }
     v <- view_range()
     cur_chr   <- if (!is.null(rv$chr)) rv$chr else input$chr
+    # The view on screen can run PAST the ends of the chromosome: zoomed out,
+    # the map sits in the middle of the viewport with empty space beside it, so
+    # west < 1 and east > chrlen. The dialog has to open on the piece of the
+    # chromosome that is actually on screen, which means clamping BOTH ends.
+    # Clamping only the left (as this did) shifted every feature sideways
+    # against what the app was showing - a gap that sat mid-view on screen
+    # turned up at the edge of the printed picture - and an end past the
+    # chromosome also stretched the map away from the tracks, because the
+    # matrix stops at the last bin but is drawn across the whole range asked
+    # for.
+    clamp_end <- function(a, b, len) {
+      if (is.null(len) || length(len) != 1 || !is.finite(len) || len <= 1)
+        return(c(a, b))
+      c(min(a, len - 1), min(b, len))
+    }
     cur_start <- if (!is.null(v)) max(1, round(v$west)) else max(1, input$start)
     cur_end   <- if (!is.null(v)) round(v$east)
                  else if (!is.null(rv$chrlen)) min(rv$chrlen, input$end) else input$end
+    xr <- clamp_end(cur_start, cur_end, rv$chrlen)
+    cur_start <- xr[1]; cur_end <- xr[2]
     if (!is.finite(cur_end) || cur_end <= cur_start)
       cur_end <- if (!is.null(rv$chrlen)) rv$chrlen else cur_start + 1e6
     # vertical axis: on a trans map it is a different chromosome with its own
@@ -3645,6 +3879,8 @@ server <- function(input, output, session) {
     cur_chr_y  <- rv$chr_y %||% cur_chr
     cur_ystart <- if (!is.null(mv)) max(1, round(mv$north)) else cur_start
     cur_yend   <- if (!is.null(mv)) round(mv$south)         else cur_end
+    yr <- clamp_end(cur_ystart, cur_yend, rv$chrlen_y %||% rv$chrlen)
+    cur_ystart <- yr[1]; cur_yend <- yr[2]
     if (!is.finite(cur_yend) || cur_yend <= cur_ystart) {
       cur_ystart <- 1
       cur_yend   <- rv$chrlen_y %||% rv$chrlen %||% (cur_ystart + 1e6)
@@ -3755,6 +3991,17 @@ server <- function(input, output, session) {
         actionButton("exp_run", tr("print_run"), class = "btn-primary"),
         modalButton(tr("print_close")))
     ))
+    # Belt and braces: the dialog is rebuilt on every open, but the PREVIOUS
+    # one's values live on in `input` until its replacement reports in - and
+    # the preview draws the moment the modal appears. Pushing the current view
+    # into the boxes makes "open" always mean "the region on screen right now".
+    updateSelectInput(session, "exp_chr", selected = cur_chr)
+    updateNumericInput(session, "exp_start", value = round(cur_start))
+    updateNumericInput(session, "exp_end",   value = round(cur_end))
+    updateSelectInput(session, "exp_chr_y",
+                      selected = if (isTRUE(rv$trans)) cur_chr_y else "")
+    updateNumericInput(session, "exp_ystart", value = round(cur_ystart))
+    updateNumericInput(session, "exp_yend",   value = round(cur_yend))
     rv$exp_msg <- ""
   })
 
@@ -3809,10 +4056,24 @@ server <- function(input, output, session) {
   # this dialog has always produced).
   # The export's horizontal axis: the whole genome in a genome-wide view,
   # otherwise whatever the dialog's chromosome/range boxes say.
+  # Both region readers clamp to the chromosome. A range typed (or inherited)
+  # past the last bin is not empty space in the picture: the matrix stops at
+  # the chromosome end but is drawn across the whole range asked for, so the
+  # map is stretched and no longer lines up with the tracks under it.
   exp_x_region <- function() {
     if (!is.null(rv$genome))
       return(list(chr = rv$genome$name[1], start = 1, end = rv$genome$total))
-    list(chr = input$exp_chr, start = input$exp_start, end = input$exp_end)
+    s <- suppressWarnings(as.numeric(input$exp_start))
+    e <- suppressWarnings(as.numeric(input$exp_end))
+    if (length(s) != 1) s <- NA_real_
+    if (length(e) != 1) e <- NA_real_
+    if (is.finite(s)) s <- max(1, s)
+    L <- chrom_len_of(input$exp_chr)
+    if (!is.null(L)) {
+      if (is.finite(s)) s <- min(s, L - 1)
+      if (is.finite(e)) e <- min(e, L)
+    }
+    list(chr = input$exp_chr, start = s, end = e)
   }
 
   exp_y_region <- function() {
@@ -3826,8 +4087,14 @@ server <- function(input, output, session) {
       return(list(chr = input$exp_chr, start = s, end = e))
     ys <- suppressWarnings(as.numeric(input$exp_ystart))
     ye <- suppressWarnings(as.numeric(input$exp_yend))
-    if (!is.finite(ys) || ys < 1) ys <- 1
-    if (!is.finite(ye) || ye <= ys) ye <- chrom_len_of(cy) %||% (ys + 1e6)
+    if (length(ys) != 1 || !is.finite(ys) || ys < 1) ys <- 1
+    if (length(ye) != 1) ye <- NA_real_
+    Ly <- chrom_len_of(cy)
+    if (!is.null(Ly)) {
+      ys <- min(ys, Ly - 1)
+      if (is.finite(ye)) ye <- min(ye, Ly)
+    }
+    if (!is.finite(ye) || ye <= ys) ye <- Ly %||% (ys + 1e6)
     list(chr = cy, start = ys, end = ye)
   }
 
@@ -3855,7 +4122,7 @@ server <- function(input, output, session) {
   # scaled colour bounds so the export matches the on-screen tiles (which scale
   # the global vmin/vmax by (res/ovres)^2 for the tile's resolution).
   exp_bounds <- function(res, diff = FALSE) {
-    f <- (res / (st$ovres %||% res))^2
+    f <- (res / (st$vref %||% st$ovres %||% res))^2
     if (isTRUE(diff)) {
       # symmetric limits; the count difference scales with bin area, the
       # dimensionless log2 ratio does not (mirrors render_tile)
@@ -3951,10 +4218,22 @@ server <- function(input, output, session) {
     else st$color %||% input$color
   }
 
+  # The preview is a PAGE preview: it keeps the paper's aspect ratio inside the
+  # box the modal gives it, so the map/track proportions on screen are the ones
+  # the printed page will have. Stretched to the panel's own shape (wide and
+  # short) it was showing a layout the paper never uses - under equal scaling
+  # the map's width follows the height it can afford, so a preview of the wrong
+  # shape gave a different picture from the file.
   output$exp_preview_ui <- renderUI({
-    w <- input$exp_w %||% 210; h <- input$exp_h %||% 297
-    ph <- max(220, min(560, round(500 * as.numeric(h) / as.numeric(w))))
-    plotOutput("exp_preview", height = paste0(ph, "px"))
+    w <- suppressWarnings(as.numeric(input$exp_w %||% 210))
+    h <- suppressWarnings(as.numeric(input$exp_h %||% 297))
+    if (!is.finite(w) || w <= 0) w <- 210
+    if (!is.finite(h) || h <= 0) h <- 297
+    sc <- min(500 / w, 560 / h)
+    tags$div(style = "display:flex; justify-content:center;",
+      plotOutput("exp_preview",
+                 width  = paste0(max(200, round(w * sc)), "px"),
+                 height = paste0(max(200, round(h * sc)), "px")))
   })
 
   output$exp_preview <- renderPlot({

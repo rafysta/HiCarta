@@ -44,6 +44,7 @@ LANG_STRINGS <- list(
     # nav pills
     nav_data = "Data", nav_region = "Navigate", nav_display = "Display",
     nav_tracks = "Tracks", nav_print = "Print", nav_setting = "Setting",
+    nav_bookmark = "Bookmarks",
     # side-panel collapse toggle (tooltip on the left-most menu icon)
     ui_collapse = "Hide the side panel", ui_expand = "Show the side panel",
     data_loader_title = "Load data", data_loader_close = "Close",
@@ -148,6 +149,11 @@ LANG_STRINGS <- list(
     region_zoom_in   = "Zoom in",
     region_zoom_out  = "Zoom out",
     bm_title    = "Bookmarks",
+    bm_panel_desc = "Saved views. Click one to jump there.",
+    bm_filter_ph  = "Filter by name / chromosome",
+    bm_count      = "%d shown / %d total",
+    bm_no_match   = "No bookmark matches the filter.",
+    bm_exchange   = "Import / export",
     bm_add      = "Bookmark this view",
     bm_name_ph  = "Name (optional)",
     bm_none     = "No bookmarks yet.",
@@ -407,6 +413,7 @@ LANG_STRINGS <- list(
     session_load  = "ファイルから復元 (.json)",
     session_help  = "表示全体（データ元・領域・スケール・全トラック）をファイルに保存し、後で読み込むと同じ表示を再現できます。",
     nav_print = "印刷", nav_setting = "設定",
+    nav_bookmark = "ブックマーク",
     nav_about = "情報",
 
     # Data panel — Excel データカタログ
@@ -503,6 +510,11 @@ LANG_STRINGS <- list(
     region_zoom_in   = "拡大",
     region_zoom_out  = "縮小",
     bm_title    = "ブックマーク",
+    bm_panel_desc = "保存した表示の一覧です。クリックするとその領域へ移動します。",
+    bm_filter_ph  = "名前・染色体で絞り込み",
+    bm_count      = "%d 件表示 / 全 %d 件",
+    bm_no_match   = "条件に一致するブックマークはありません。",
+    bm_exchange   = "読み込み / 書き出し",
     bm_add      = "この表示を保存",
     bm_name_ph  = "名前（任意）",
     bm_none     = "ブックマークはまだありません。",
