@@ -16,7 +16,7 @@ Click the **Data** button at the top to open the loader. It has three tabs: **Da
 
 All data — contact maps and tracks — is opened from the **[data catalog](data-catalog.md)**, an Excel file in which one row = one sample.
 
-**Load the catalog** — The path/URL field starts with `catalog_url` from `config.txt`; **Browse…** picks a local file. Click **Load** to (re)read it. Broken rows are excluded and listed with the sample name and the reason.
+**Load the catalog** — The path/URL field starts with `catalog_url` from `config.txt`; **Browse…** picks a local file (the location list starts with **Desktop / Documents / Downloads / Home** and then the drives; on Windows a Desktop redirected into OneDrive is found correctly). Click **Load** to (re)read it. Broken rows are excluded and listed with the sample name and the reason.
 
 **Filter and search** — The left sidebar has an incremental sample-name search, an all-columns search (comments included), dropdown filters generated from the catalog's own columns, and a date-range filter. All conditions combine; each dropdown only offers values that still match the other conditions.
 
@@ -71,7 +71,7 @@ Two things work differently on an inter-chromosome map, because it has no diagon
 
 **Step** — Choose the amount each direction button moves, as a fraction of the range in view (**¼ · ½ · 1**).
 
-**Bookmarks** — Save the current view and return to it later. Enter a name in the name field (optional) and register it with **★ Bookmark this view**. A bookmark remembers not only the place but also **which data was open** (catalog id, paths, normalization, resolution, color max), so clicking one restores the whole picture. **Delete** removes one. Bookmarks are also saved in a session, and can be exchanged as Excel: **Save to Excel** downloads the list, **Load from Excel (append)** takes a path or URL (**Browse…** picks a local file) and, on **Load**, appends the rows of that file ([details](data-catalog.md#bookmarks-as-excel)).
+**Bookmarks** — Register a region of interest and come back to it with one click. Enter a name in the name field (optional) and register it with **★ Bookmark this view**. A bookmark records **the place only** — the chromosome and the X / Y ranges — with no data reference and no display settings. Clicking one moves to that region **inside whatever data is currently open**, so the same bookmark can be reused sample after sample for comparison; the normalization, resolution and color scale in force are left untouched. **Delete** removes one. Bookmarks are also saved in a session, and can be exchanged as Excel: **Save to Excel** downloads the list, **Load from Excel (append)** takes a path or URL (**Browse…** picks a local file) and, on **Load**, appends the rows of that file ([details](data-catalog.md#bookmarks-as-excel)).
 
 ---
 

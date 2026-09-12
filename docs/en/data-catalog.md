@@ -23,7 +23,7 @@ Sheets is not supported — export/share as `.xlsx`.
 
 | Column | Meaning |
 |---|---|
-| `id` | A **number, unique** within the catalog. Used to refer to the sample (e.g. from bookmarks). |
+| `id` | A number, used for the list and the ID search. **Uniqueness is preferred but not required** — a repeated id does not exclude the row, it is only reported as a warning (nothing inside HiCarta looks a row up by id). This lets sample series with independent numbering live in one catalog. |
 | `name` | Sample name shown in the list. |
 | `path` | File path or URL. Can hold **several `;`-separated entries** (see below). |
 
@@ -96,27 +96,39 @@ warning.
 
 ## Validation
 
-When a catalog is loaded, broken rows — a missing/duplicated/non-numeric `id`,
-an empty `path`, mismatched `;` counts — are **excluded** and listed above the
-table with the sample name and the reason. Soft problems (an unparsable date,
-an unknown `file_type` or `set_` column) are warnings only; the row still
-loads.
+When a catalog is loaded, broken rows — a missing or non-numeric `id`,
+an empty `path`, mismatched `;` counts — are **excluded**. Soft problems (a
+duplicated `id`, a **`path` that looks like neither a file nor a URL**, an
+unparsable date, an unknown `file_type` or `set_` column) are warnings only; the
+row still loads.
+
+A `path` counts as well-formed if it has a URL scheme (`https://` and friends),
+a path separator (`/` or `\`), or a file extension. A value with none of those
+(`ICE`, `KR`, `5000`) is the classic sign of a shifted column, so it is flagged
+— and opening such a row stops with the same explanation instead of failing
+later with a message about the file.
+
+Above the table only the **counts** appear, as a single line each — "Excluded
+rows: 3 (click to see them)". Click that line to unfold the list with the sample
+name and the reason for each (click again to fold it away). When there are many,
+the list stops at the first 200 and the rest are summarised as "...and N more".
 
 ---
 
 ## Bookmarks as Excel
 
-Bookmarks (**Navigate** panel) remember not only the place but also **which
-data was open** (catalog id, paths, normalization, resolution, color max), so
-clicking one restores the whole picture. Two buttons exchange them with an
-`.xlsx`:
+Bookmarks (**Navigate** panel) record **the place only** — the chromosome and
+the X / Y ranges. Clicking one moves to that region inside whatever data is
+currently open, which is what makes them useful for comparing a region of
+interest across samples. Two buttons exchange them with an `.xlsx`:
 
 - **Save to Excel** downloads the current list (one row per bookmark; columns
-  `bookmark_name, catalog_id, path, entry, chr, start, end, ystart, yend,
-  norm, resolution, vmax, comment`).
+  `bookmark_name, chr, start, end, chr_y, ystart, yend, comment`).
 - **Load from Excel (append)** reads such a file and **appends** its rows to
   the current list — existing bookmarks are never touched. Broken rows are
-  skipped and reported with the name and reason, like the catalog itself.
+  skipped and reported with the name and reason, like the catalog itself. Files
+  written by older versions, carrying `catalog_id` / `path` / `norm` and the
+  other display columns, still load — those columns are ignored.
 
 The file is ordinary Excel, so you can annotate the `comment` column, curate a
 list of regions by hand, or share it with collaborators.

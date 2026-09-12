@@ -8,8 +8,8 @@
 #
 # Every valid catalog row whose file_type is "hic" becomes one sample group;
 # each of its ";"-separated path entries becomes one dataset line:
-#   s<id>   = root, <name>
-#   s<id>_1 = s<id>, <label or file name>, <url>
+#   s<n>   = root, <name>          (n = a counter, not the catalog id:
+#   s<n>_1 = s<n>, <label or file name>, <url>   ids need not be unique)
 #
 # Run from the HiCarta folder (the script sources R/i18n.R and R/catalog.R).
 # Requires: readxl  (already required by HiCarta itself)
@@ -43,8 +43,13 @@ names_col <- cc$data[[which(tolower(trimws(names(cc$data))) == "name")[1]]]
 lines <- c("# Juicer-style sample menu exported from an Excel data catalog",
            sprintf("# source: %s  (%s)", cat_file, format(Sys.Date())), "")
 n_sets <- 0L
+node   <- 0L
 for (i in which(is_hic)) {
-  sid  <- sprintf("s%s", format(cc$id[i], scientific = FALSE, trim = TRUE))
+  # The node key has to be unique within the menu tree, and catalog ids need
+  # not be (duplicates are allowed and only warned about), so number the nodes
+  # here instead of reusing the id.
+  node <- node + 1L
+  sid  <- sprintf("s%d", node)
   urls <- cc$paths[[i]]
   labs <- cc$labels[[i]]
   lines <- c(lines, sprintf("%s = root, %s", sid, names_col[i]))

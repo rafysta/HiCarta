@@ -86,7 +86,7 @@ Click the button in the center of the direction pad (⌂) in the **Navigate** me
 2. If you like, enter a name in the name field at the bottom of the **Navigate** menu (optional).
 3. Click **★ Bookmark this view**.
 
-Saved bookmarks appear in a list; click one to return to that view at any time — the bookmark also remembers which data was open (and its normalization, resolution and color max), so the whole picture is restored. Remove one you no longer need with **Delete**. **Save to Excel** / **Load from Excel (append)** exchange the list as an `.xlsx` you can annotate and share ([details](data-catalog.md#bookmarks-as-excel)).
+Saved bookmarks appear in a list; click one to return to that region at any time. Only the place is recorded, so clicking a bookmark while a different sample is open moves to the same region in that sample — which is what makes them useful for comparing a region of interest across samples. The normalization, resolution and color scale in force are left untouched. Remove one you no longer need with **Delete**. **Save to Excel** / **Load from Excel (append)** exchange the list as an `.xlsx` you can annotate and share ([details](data-catalog.md#bookmarks-as-excel)).
 
 ![](../images/bookmark.png)
 

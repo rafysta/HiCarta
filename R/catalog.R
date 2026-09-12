@@ -5,7 +5,8 @@
 # "HiCarta_Excelカタログ仕様書_草案.md" (v0.3). Summary:
 #   * sheet 1 only; row 1 = header; rows whose `id` cell starts with "#" are
 #     DIRECTIVE rows (e.g. "#show" = initial column visibility), not data.
-#   * required columns  : id (numeric, unique), name, path
+#   * required columns  : id (numeric; duplicates are warned about, not
+#                         excluded - nothing resolves a row by id), name, path
 #   * recognised columns: file_type (hic/bigwig/bed/gff3/bs; guessed from the
 #     path extension when absent), experiment_type, project, sample_sheet,
 #     date (YYYY-MM-DD), genome, label, comment
@@ -13,7 +14,7 @@
 #   * multi-value cells : path / label / set_* may hold several ";"-separated
 #     values (full-width "；" tolerated). Within a row every such column must
 #     hold 1 or N values; single values are recycled to all N entries.
-#   * validation        : broken rows (bad/duplicated id, empty path,
+#   * validation        : broken rows (bad id, empty path,
 #     mismatched ";" counts) are EXCLUDED and reported with name + reason;
 #     soft problems (unparsable date, unknown file_type / set_ column /
 #     directive) are warnings only.
@@ -63,6 +64,20 @@ cat_split <- function(x) {
   x <- gsub("；", ";", x, fixed = TRUE)      # full-width semicolon
   parts <- trimws(strsplit(x, ";", fixed = TRUE)[[1]])
   parts[nzchar(parts)]
+}
+
+# Does this cell look like it names a FILE at all? A shifted column is the
+# commonest way a catalog goes wrong - normalization or resolution ends up in
+# `path` - and nothing downstream can tell "ICE" from a file that merely failed
+# to open, so the user chases the wrong problem. Accept a URL scheme, anything
+# holding a path separator, and anything with a file extension; reject the bare
+# words that a column shift leaves behind ("ICE", "KR", "5000", "wt_HiC_rep1").
+cat_path_shape_ok <- function(p) {
+  p <- trimws(as.character(p)[1])
+  if (is.na(p) || !nzchar(p)) return(FALSE)
+  grepl("^[A-Za-z][A-Za-z0-9+.-]*://", p) ||      # http(s)://, ftp://, file://
+    grepl("[/\\\\]", p) ||                          # any path separator
+    grepl("\\.[A-Za-z0-9]{1,10}$", p)               # a plausible extension
 }
 
 # guess the file type from a path (used when the file_type column is absent
@@ -251,6 +266,13 @@ read_catalog <- function(src) {
                           tr("cat_v_path_empty"))
       bad[k] <- TRUE
     }
+    # a path that names no file at all (see cat_path_shape_ok): warn, but keep
+    # the row - the user may have a naming scheme we did not anticipate, and
+    # the message on the load report says exactly which value looks wrong
+    odd <- ps[!vapply(ps, cat_path_shape_ok, logical(1))]
+    if (length(odd) > 0)
+      warnings <- add_issue(warnings, xr, idc, nm, columns[path_col],
+                            sprintf(tr("cat_v_path_odd"), odd[1]))
     paths[[k]]   <- ps
     n_entries[k] <- max(1L, length(ps))
 
@@ -298,14 +320,20 @@ read_catalog <- function(src) {
     }
   }
 
-  # duplicated ids: exclude EVERY row involved (a clear signal to fix the file)
+  # Duplicated ids are reported but NOT excluded. Nothing inside HiCarta looks a
+  # row up by id any more - the browser, the detail dialog and every open action
+  # address rows by position, bookmarks record only a place, and session files
+  # reference the data by path - so a repeated id costs nothing but an ID search
+  # that returns more than one row. Keeping the rows lets separately numbered
+  # collections (a Hi-C series and a ChIP-seq series, say) live in one catalog,
+  # where the other filters tell them apart. The warning stays so that a
+  # genuinely accidental duplicate is still visible in the load report.
   dup_vals <- unique(id_num[!is.na(id_num)][duplicated(id_num[!is.na(id_num)])])
   if (length(dup_vals) > 0) for (k in which(id_num %in% dup_vals)) {
     i <- keep_i[k]
-    errors <- add_issue(errors, i + 1L, df[[id_col]][i],
-                        df[[name_col]][i], columns[id_col],
-                        tr("cat_v_id_dup"))
-    bad[k] <- TRUE
+    warnings <- add_issue(warnings, i + 1L, df[[id_col]][i],
+                          df[[name_col]][i], columns[id_col],
+                          tr("cat_v_id_dup"))
   }
 
   ok_k <- which(!bad)

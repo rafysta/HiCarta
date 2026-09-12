@@ -56,7 +56,7 @@ Use the 8-direction buttons (up/down/left/right plus diagonals) to move the map 
 
 ### Bookmarks
 
-Give the current view (region) a name and save it, then return to the same place later with one click. Useful for registering regions you revisit often.
+Give a region of interest a name and save it, then return to the same place later with one click. Only the place is recorded, so switching samples and clicking the same bookmark shows that region in the new sample — handy for comparing a region of interest across samples.
 
 → [Bookmark a region of interest](usage.md#bookmark)
 

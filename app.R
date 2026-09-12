@@ -113,6 +113,53 @@ TRK_PALETTE <- local({
 
 # Clickable swatch grid: stores the picked colour in input[[input_id]] and
 # moves the selection border. Pure HTML/JS — no extra package.
+# ---------------------------------------------------------------------------
+# Handy roots for the shinyFiles pickers.
+#
+# shinyFiles offers ONE dropdown of "roots", and with just Home and the drive
+# letters every pick of a file on the Desktop costs four clicks. So the folders
+# people actually keep files in get their own entry.
+#
+# Windows makes this less obvious than it sounds: Desktop and Documents are
+# routinely redirected into OneDrive, so %USERPROFILE%\Desktop may not exist
+# while the real Desktop lives somewhere else entirely. The registry's "Shell
+# Folders" key knows where they really are, so ask it first and fall back to
+# the OneDrive root and then to the plain home-relative path. Anything that
+# does not exist is simply left out, so this is safe on every platform.
+# ---------------------------------------------------------------------------
+user_dirs <- function() {
+  home <- normalizePath("~", winslash = "/", mustWork = FALSE)
+  reg  <- if (identical(.Platform$OS.type, "windows"))
+    tryCatch(utils::readRegistry(
+      "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders",
+      hive = "HCU"), error = function(e) NULL) else NULL
+  od <- Sys.getenv(c("OneDrive", "OneDriveCommercial", "OneDriveConsumer"))
+  od <- unname(od[nzchar(od)])
+
+  first_dir <- function(...) {
+    for (p in unlist(list(...), use.names = FALSE)) {
+      if (is.null(p) || is.na(p) || !nzchar(p)) next
+      p <- normalizePath(p, winslash = "/", mustWork = FALSE)
+      if (dir.exists(p)) return(p)
+    }
+    NULL
+  }
+  # "Personal" is the registry's name for Documents
+  found <- list(
+    list(tr("dir_desktop"),   first_dir(reg[["Desktop"]],
+                                        file.path(od, "Desktop"),
+                                        file.path(home, "Desktop"))),
+    list(tr("dir_documents"), first_dir(reg[["Personal"]],
+                                        file.path(od, "Documents"),
+                                        file.path(home, "Documents"))),
+    list(tr("dir_downloads"), first_dir(file.path(home, "Downloads"),
+                                        file.path(od, "Downloads"))))
+  out <- character(0)
+  for (f in found)
+    if (!is.null(f[[2]])) out <- c(out, stats::setNames(f[[2]], f[[1]]))
+  out
+}
+
 color_swatch_grid <- function(input_id, selected) {
   cols <- TRK_PALETTE
   if (!is.null(selected) && nzchar(selected) && !(selected %in% cols))
@@ -706,6 +753,14 @@ ui <- function(request) {
     ".path-row .shiny-input-container{width:100%}",
     ".path-row .path-input .form-control{width:100%}",
     ".path-row .btn{flex:0 0 auto; height:34px; white-space:nowrap}",
+    # catalog load report: counts only, click a line to unfold the detail
+    "#cat_report_box{margin:2px 0 8px 0}",
+    ".cat-issues{margin-bottom:2px}",
+    ".cat-issues > summary{cursor:pointer; font-weight:bold; outline:none;",
+    "  user-select:none; padding:1px 0}",
+    ".cat-issues > summary:hover{text-decoration:underline}",
+    ".cat-issue-list{margin:4px 0 4px 0; max-height:190px; overflow-y:auto;",
+    "  padding-left:22px}",
     # filters fixed at 300px, the list takes every remaining pixel
     "#cat_body_row{display:flex; gap:16px; align-items:flex-start}",
     "#cat_filter_col{flex:0 0 300px; min-width:0}",
@@ -1162,7 +1217,6 @@ server <- function(input, output, session) {
                        catalog = NULL, cat_msg = "", cat_hic = NULL,
                        cat_src = NULL, cat_detail_row = NULL,
                        cat_filters = list(), trk_pending = NULL,
-                       cat_open_id = NULL, cat_open_entry = NULL,
                        # dl_msg: status line of the direct-file tab
                        dl_msg = "",
                        ov = NULL, ov_res = NULL, chr = NULL, chrlen = NULL,
@@ -1231,8 +1285,15 @@ server <- function(input, output, session) {
   # desktop build). The chosen file's full path fills the matching text box:
   #   .hic  -> Data panel path;   bigWig/BED/GFF3 -> Tracks panel path.
   if (HAS_SHINYFILES) {
-    sf_roots <- c(Home = normalizePath("~", winslash = "/", mustWork = FALSE),
+    # Desktop / Documents / Downloads first (that is where a file being picked
+    # for a one-off almost always is), then Home, then the drives. Duplicates
+    # are dropped by PATH so a redirected Desktop cannot appear twice.
+    sf_roots <- c(user_dirs(),
+                  stats::setNames(normalizePath("~", winslash = "/",
+                                                mustWork = FALSE),
+                                  tr("dir_home")),
                   shinyFiles::getVolumes()())
+    sf_roots <- sf_roots[!duplicated(sf_roots) & !duplicated(names(sf_roots))]
 
     # catalog picker (.xlsx) for the Data panel
     shinyFiles::shinyFileChoose(input, "cat_file_btn", roots = sf_roots,
@@ -1316,25 +1377,43 @@ server <- function(input, output, session) {
   })
   output$cat_status <- renderText(rv$cat_msg)
 
-  # excluded rows / soft problems, each named by sample and reason (spec §5)
+  # Excluded rows / soft problems (spec §5). A big catalog can raise hundreds of
+  # warnings - duplicated ids across merged sample series, say - and printing
+  # them all pushed the sample list off the screen. So only the COUNTS show, as
+  # a clickable line each; the per-row detail is inside a <details> element that
+  # the browser opens on click, with no round trip to R and no extra library.
+  CAT_ISSUE_MAX <- 200L      # never build more <li> than this per category
   output$cat_report <- renderUI({
     cat <- rv$catalog
     if (is.null(cat)) return(NULL)
     err <- cat$errors; wrn <- cat$warnings
     if (nrow(err) == 0 && nrow(wrn) == 0) return(NULL)
-    fmt <- function(d) tags$ul(style = "margin-bottom:4px;",
-      lapply(seq_len(nrow(d)), function(i) {
-        who <- if (nzchar(d$name[i])) d$name[i]
-               else sprintf(tr("cat_row_n"), d$row[i])
-        idp <- if (nzchar(d$id[i])) sprintf(" (id=%s)", d$id[i]) else ""
-        col <- if (nzchar(d$column[i])) sprintf(" [%s]", d$column[i]) else ""
-        tags$li(tags$small(sprintf("%s%s%s: %s", who, idp, col, d$message[i])))
-      }))
-    tagList(
-      if (nrow(err) > 0) div(style = "color:#a94442;",
-        tags$b(sprintf(tr("cat_report_errors"), nrow(err))), fmt(err)),
-      if (nrow(wrn) > 0) div(style = "color:#8a6d3b;",
-        tags$b(sprintf(tr("cat_report_warn"), nrow(wrn))), fmt(wrn)))
+    one <- function(d, i) {
+      who <- if (nzchar(d$name[i])) d$name[i]
+             else sprintf(tr("cat_row_n"), d$row[i])
+      idp <- if (nzchar(d$id[i])) sprintf(" (id=%s)", d$id[i]) else ""
+      col <- if (nzchar(d$column[i])) sprintf(" [%s]", d$column[i]) else ""
+      tags$li(tags$small(sprintf("%s%s%s: %s", who, idp, col, d$message[i])))
+    }
+    fmt <- function(d) {
+      n    <- nrow(d)
+      show <- min(n, CAT_ISSUE_MAX)
+      tagList(
+        tags$ul(class = "cat-issue-list",
+                lapply(seq_len(show), function(i) one(d, i))),
+        # a catalog with thousands of rows should not build thousands of nodes
+        if (n > show)
+          tags$p(tags$small(sprintf(tr("cat_report_more"), n - show))))
+    }
+    blk <- function(d, key, colour) {
+      if (nrow(d) == 0) return(NULL)
+      tags$details(class = "cat-issues", style = paste0("color:", colour, ";"),
+        tags$summary(sprintf(tr(key), nrow(d))),
+        fmt(d))
+    }
+    div(id = "cat_report_box",
+        blk(err, "cat_report_errors", "#a94442"),
+        blk(wrn, "cat_report_warn",   "#8a6d3b"))
   })
 
   output$cat_hint <- renderUI({
@@ -1656,9 +1735,6 @@ server <- function(input, output, session) {
     src <- if (tg$virt) tg$ps else tg$ps[tg$k]
     removeModal()
     rv$cat_src <- src
-    # remembered for bookmarks: which catalog row / entry is on screen
-    rv$cat_open_id    <- suppressWarnings(as.numeric(tg$cat$id[tg$i]))
-    rv$cat_open_entry <- if (tg$virt) "auto" else as.character(tg$k)
     do_open(src = src,
             norm = if (!is.na(s_norm) && nzchar(s_norm)) s_norm else NULL,
             vmax = if (is.finite(s_vmax) && s_vmax > 0) s_vmax else NULL,
@@ -1780,9 +1856,6 @@ server <- function(input, output, session) {
     if (!nzchar(nm)) nm <- dl_display_name(ps)
     nrm <- trimws(input$dl_hic_norm %||% "")
     rv$cat_src <- ps
-    # a hand-typed path is not a catalog row: a bookmark taken from this view
-    # must fall back to the stored path, not to a stale catalog id
-    rv$cat_open_id <- NULL; rv$cat_open_entry <- NULL
     do_open(src = ps, norm = if (nzchar(nrm)) nrm else NULL, name = nm)
     rv$dl_msg <- rv$msg
   })
@@ -2106,6 +2179,19 @@ server <- function(input, output, session) {
     if (length(s) == 0) NULL else s
   }
 
+  # The first value among `paths` that does not name a file at all, or NULL when
+  # they all look fine. A catalog whose columns have shifted puts a
+  # normalization or a resolution into `path`, and without this check the run
+  # fails much later with a message about the FILE ("no chromosome
+  # information"), which sends the user looking in entirely the wrong place.
+  odd_path <- function(paths) {
+    paths <- as.character(paths)
+    paths <- paths[!is.na(paths) & nzchar(paths)]
+    if (!length(paths)) return(NULL)
+    bad <- paths[!vapply(paths, cat_path_shape_ok, logical(1))]
+    if (length(bad)) bad[1] else NULL
+  }
+
   # Open a .hic and render it. All parameters default to the current inputs, but
   # can be passed explicitly (used by session restore and the catalog, which
   # must not depend on asynchronous input updates).
@@ -2126,6 +2212,8 @@ server <- function(input, output, session) {
                       vmax = NULL, name = NULL, fixed_res = NULL,
                       vref_in = NULL) {
     if (is.null(src)) { rv$msg <- tr("msg_pick_src"); return() }
+    bad <- odd_path(src)
+    if (!is.null(bad)) { rv$msg <- sprintf(tr("msg_path_odd"), bad); return() }
     tryCatch({
       chr_y <- resolve_chr_y(chr_y, chr)
       # A comparison sample is tied to A's chromosome and resolution set, both of
@@ -2600,6 +2688,10 @@ server <- function(input, output, session) {
     if (is.null(src) || !nzchar(src)) {
       rv$cmp_msg <- tr("msg_cmp_pick"); return(invisible(NULL))
     }
+    bad <- odd_path(src)
+    if (!is.null(bad)) {
+      rv$cmp_msg <- sprintf(tr("msg_path_odd"), bad); return(invisible(NULL))
+    }
     tryCatch({
       withProgress(message = tr("prog_cache_hic"), value = 0.3, {
         path <- tryCatch(hic_source(src),
@@ -2871,12 +2963,10 @@ server <- function(input, output, session) {
       ymin = if (is.null(t$ymin) || !is.finite(t$ymin)) NA else t$ymin,
       agg = if (is.null(t$agg)) "mean" else t$agg,
       bins = t$bins %||% rv$trk_bins))
+    # bookmarks are places only (see add_bookmark / input$bm_goto)
     bookmarks <- lapply(unname(rv$bookmarks), function(b) list(
       name = b$name, chr = b$chr, chr_y = b$chr_y %||% b$chr,
       x0 = b$x0, x1 = b$x1, y0 = b$y0, y1 = b$y1,
-      cat_id = b$cat_id %||% NA, path = b$path %||% "",
-      entry = b$entry %||% "", norm = b$norm %||% "",
-      resolution = b$resolution %||% NA, vmax = b$vmax %||% NA,
       comment = b$comment %||% ""))
     # the comparison sample and how it is combined with A
     cmp <- if (isTRUE(rv$has_b))
@@ -2945,12 +3035,11 @@ server <- function(input, output, session) {
     bl <- list(); bn <- 0L
     for (b in (sess$bookmarks %||% list())) {
       bn <- bn + 1L
+      # older sessions carry a data reference and display settings per
+      # bookmark; they are read and dropped - a bookmark is a place now
       bl[[as.character(bn)]] <- list(id = bn, name = b$name %||% sprintf("bm%d", bn),
         chr = b$chr, chr_y = b$chr_y %||% b$chr,
         x0 = b$x0, x1 = b$x1, y0 = b$y0, y1 = b$y1,
-        cat_id = b$cat_id %||% NA, path = b$path %||% "",
-        entry = b$entry %||% "", norm = b$norm %||% "",
-        resolution = b$resolution %||% NA, vmax = b$vmax %||% NA,
         comment = b$comment %||% "")
     }
     rv$bm_seq <- bn; rv$bookmarks <- bl
@@ -3404,89 +3493,79 @@ server <- function(input, output, session) {
           else if (!is.null(rv$genome)) tr("region_chr_all")
           else sprintf("%s:%s-%s", rv$chr, format(x0, big.mark = ","),
                        format(x1, big.mark = ","))
-    # a bookmark taken with a contact map on screen also remembers WHICH data
-    # and how it was shown, so jumping to it can restore the whole picture
-    dat <- if (isTRUE(rv$has_hic)) list(
-      cat_id = rv$cat_open_id %||% NA,
-      path   = paste(current_src() %||% character(0), collapse = ";"),
-      entry  = as.character(rv$cat_open_entry %||% ""),
-      norm   = st$norm %||% "NONE",
-      resolution = if (!is.null(st$fixedRes)) as.numeric(st$fixedRes) else NA,
-      vmax   = suppressWarnings(as.numeric(st$vmax)))
-    else list(cat_id = NA, path = "", entry = "", norm = "",
-              resolution = NA, vmax = NA)
-    rv$bookmarks[[as.character(id)]] <- c(
-      list(id = id, name = nm, chr = rv$chr, chr_y = rv$chr_y %||% rv$chr,
-           x0 = x0, x1 = x1, y0 = y0, y1 = y1, comment = ""), dat)
+    # A bookmark records a PLACE, not a picture. The point of one is to visit
+    # the same locus in every sample, so it deliberately carries NO data
+    # reference and no display settings: see input$bm_goto.
+    rv$bookmarks[[as.character(id)]] <- list(
+      id = id, name = nm, chr = rv$chr, chr_y = rv$chr_y %||% rv$chr,
+      x0 = x0, x1 = x1, y0 = y0, y1 = y1, comment = "")
     updateTextInput(session, "bm_name",  value = "")
     updateTextInput(session, "bm_name2", value = "")
   }
   observeEvent(input$bm_add,  add_bookmark(input$bm_name))
   observeEvent(input$bm_add2, add_bookmark(input$bm_name2))
 
-  # Click a bookmark. Same data + same chromosome -> smooth pan; anything else
-  # re-opens: the bookmarked dataset (resolved through the CURRENT catalog by
-  # catalog_id when possible, so updated paths are picked up; else the stored
-  # path) with its saved normalization / resolution / colour scale.
+  # Click a bookmark. A bookmark is a REGION OF INTEREST, not a saved picture:
+  # its whole purpose is to compare the same locus across samples, so the jump
+  # always happens INSIDE THE DATA THAT IS CURRENTLY OPEN. It never re-opens the
+  # dataset that happened to be on screen when it was made, and it never
+  # overwrites the normalization, resolution or colour scale in force.
   observeEvent(input$bm_goto, {
     b <- rv$bookmarks[[as.character(input$bm_goto)]]
     if (is.null(b)) return()
-    # resolve the bookmark's data source (empty for track-only bookmarks)
-    bsrc <- character(0)
-    if (!is.null(b$path) && nzchar(b$path %||% "")) {
-      cid <- suppressWarnings(as.numeric(b$cat_id %||% NA))
-      if (!is.null(rv$catalog) && length(cid) == 1 && is.finite(cid)) {
-        i <- which(rv$catalog$id == cid)
-        if (length(i) == 1 && identical(rv$catalog$file_type[i], "hic")) {
-          ps <- rv$catalog$paths[[i]]
-          k  <- suppressWarnings(as.integer(b$entry %||% ""))
-          bsrc <- if (identical(b$entry %||% "", "auto")) ps
-                  else if (!is.na(k) && k >= 1 && k <= length(ps)) ps[k]
-                  else ps
-        }
-      }
-      if (length(bsrc) == 0) bsrc <- cat_split(b$path)
-    }
-    cur <- current_src() %||% character(0)
-    same_data <- length(bsrc) == 0 ||
-      identical(paste(bsrc, collapse = "|"), paste(cur, collapse = "|"))
-    if (same_data && !isTRUE(rv$has_hic)) {   # track-only: move the x-range
-      if (!is.null(rv$chrinfo) && b$chr %in% names(rv$chrinfo)) {
-        updateSelectInput(session, "chr", selected = b$chr)
-        set_track_view(b$chr, b$x0, b$x1)
-      }
-      return()
-    }
     # A bookmark written before inter-chromosome views existed has no Y
     # chromosome; those were all cis, so its X chromosome is both axes.
     bchr_y <- b$chr_y %||% NA
     if (length(bchr_y) != 1 || is.na(bchr_y) || !nzchar(as.character(bchr_y)))
       bchr_y <- b$chr
     bchr_y <- as.character(bchr_y)
-    if (same_data && isTRUE(rv$has_hic) && identical(b$chr, rv$chr) &&
-        identical(bchr_y, rv$chr_y %||% rv$chr)) {
+    bchr   <- as.character(b$chr)
+
+    # ---- track-only mode: no contact map, so just move the x range --------
+    if (!isTRUE(rv$has_hic)) {
+      if (is.null(rv$chrinfo)) { rv$msg <- tr("msg_pick_src"); return() }
+      cc <- match_chrom(bchr, names(rv$chrinfo))
+      if (is.na(cc)) {
+        showNotification(sprintf(tr("msg_bm_no_chrom"), bchr),
+                         type = "warning", duration = 6)
+        return()
+      }
+      updateSelectInput(session, "chr", selected = cc)
+      set_track_view(cc, b$x0, b$x1)
+      return()
+    }
+
+    src <- current_src()
+    if (is.null(src) || length(src) == 0) { rv$msg <- tr("msg_pick_src"); return() }
+
+    # already on the right chromosome pair: pan there, no re-read at all
+    if (identical(bchr, as.character(rv$chr)) &&
+        identical(bchr_y, as.character(rv$chr_y %||% rv$chr))) {
       session$sendCustomMessage("gotoView",
         list(x0 = b$x0, x1 = b$x1, y0 = b$y0, y1 = b$y1))
       return()
     }
-    src <- if (length(bsrc) > 0) bsrc else current_src()
-    if (is.null(src) || length(src) == 0) { rv$msg <- tr("msg_pick_src"); return() }
-    if (length(bsrc) > 0) rv$cat_src <- bsrc
-    bres <- suppressWarnings(as.numeric(b$resolution %||% NA))
-    bvmx <- suppressWarnings(as.numeric(b$vmax %||% NA))
-    # Jumping inside the DATASET THAT IS ALREADY OPEN is navigation: the map
-    # keeps the colour scale, palette and resolution mode the user has set, so
-    # every stop on a tour is drawn in the same style. The bookmark's own saved
-    # display settings are only applied when it takes us to a different dataset,
-    # where the values on screen would mean nothing.
-    do_open(src = src, chr = b$chr, chr_y = bchr_y,
+
+    # another chromosome of the SAME dataset: re-open it there. Names are
+    # matched tolerantly ("chr1" vs "1") because the bookmark may have been
+    # written while a file with a different spelling was open.
+    known <- names(rv$chrom_len %||% numeric(0))
+    cx <- if (identical(bchr,   GENOME_KEY)) GENOME_KEY else match_chrom(bchr,   known)
+    cy <- if (identical(bchr_y, GENOME_KEY)) GENOME_KEY else match_chrom(bchr_y, known)
+    if (length(known) && (is.na(cx) || is.na(cy))) {
+      showNotification(sprintf(tr("msg_bm_no_chrom"),
+                               if (is.na(cx)) bchr else bchr_y),
+                       type = "warning", duration = 6)
+      return()
+    }
+    if (is.na(cx)) cx <- bchr
+    if (is.na(cy)) cy <- bchr_y
+    # st$norm keeps the normalization the user has chosen; vmax / fixed_res are
+    # left at their defaults so do_open()'s keep_display carries the current
+    # colour scale and resolution mode over (same dataset = navigation)
+    do_open(src = src, chr = cx, chr_y = cy,
             start = b$x0, end = b$x1, ystart = b$y0, yend = b$y1,
-            norm = if (!same_data && !is.null(b$norm) && nzchar(b$norm %||% "")) b$norm
-                   else st$norm,
-            vmax = if (!same_data && length(bvmx) == 1 && is.finite(bvmx) &&
-                       bvmx > 0) bvmx else NULL,
-            fixed_res = if (!same_data && length(bres) == 1 && is.finite(bres) &&
-                            bres > 0) bres else NULL)
+            norm = st$norm)
   })
   observeEvent(input$bm_del, { rv$bookmarks[[as.character(input$bm_del)]] <- NULL })
 
@@ -3921,6 +4000,10 @@ server <- function(input, output, session) {
   add_track <- function(path, type, name = NULL, color = NULL, height = NULL) {
     if (is.null(path) || !nzchar(path)) {
       rv$trk_msg <- tr("msg_enter_track"); return(invisible(FALSE)) }
+    bad <- odd_path(path)
+    if (!is.null(bad)) {
+      rv$trk_msg <- sprintf(tr("msg_path_odd"), bad); return(invisible(FALSE))
+    }
     withProgress(message = tr("prog_cache_trk"), value = 0.4, {
       # bigWig is streamed (URL kept as-is); other track types are parsed whole
       # and still need a local copy.
@@ -3945,7 +4028,14 @@ server <- function(input, output, session) {
       ci <- withProgress(message = tr("prog_chrom_info"), value = 0.6, {
               tryCatch(track_chrom_info(lp, ty), error = function(e) NULL) })
       if (is.null(ci) || length(ci) == 0) {
-        rv$trk_msg <- tr("msg_no_chrom"); return(invisible(FALSE))
+        # say WHAT failed, not just that something did (R/chrominfo.R keeps the
+        # reason for the attempt it just made)
+        why <- tryCatch(track_chrom_info_why(), error = function(e) "")
+        rv$trk_msg <- paste0(tr("msg_no_chrom"),
+                             if (nzchar(why))
+                               paste0("\n", sprintf(tr("msg_no_chrom_why"), why))
+                             else "")
+        return(invisible(FALSE))
       }
       rv$chrinfo <- ci
       updateSelectInput(session, "chr", choices = names(ci), selected = names(ci)[1])
