@@ -33,6 +33,7 @@ source("R/tiles.R",       local = TRUE)
 source("R/tracks.R",      local = TRUE)
 source("R/genes.R",       local = TRUE)
 source("R/borderstrength.R", local = TRUE)
+source("R/arcs.R",        local = TRUE)
 source("R/chrominfo.R",    local = TRUE)
 source("R/export.R",       local = TRUE)
 
@@ -975,9 +976,10 @@ ui <- function(request) {
               fluidRow(
                 column(6, selectInput("dl_trk_type", tr("direct_trk_type"),
                           choices = setNames(
-                            c("auto", "bigWig", "BED", "gene", "BorderStrength"),
+                            c("auto", "bigWig", "BED", "gene", "BorderStrength", "Arc"),
                             c(tr("direct_auto"), "bigWig", "BED",
-                              tr("direct_type_gene"), tr("direct_type_bs"))),
+                              tr("direct_type_gene"), tr("direct_type_bs"),
+                              tr("direct_type_arc"))),
                           selected = "auto")),
                 column(6, textInput("dl_trk_name", tr("trk_label"), value = ""))),
               tags$label(tr("trk_color")),
@@ -1225,6 +1227,7 @@ server <- function(input, output, session) {
                        #           navigation from a genuinely new dataset
                        open_src = NULL,
                        tileURL = NULL, tracks = list(), trk_seq = 0, trk_bins = 1000,
+                       arc_warned = list(),
                        trk_msg = "", sample_name = NULL, restore_vmax = NULL,
                        bookmarks = list(), bm_seq = 0L,
                        exp_key = NULL, exp_data = NULL, exp_msg = "",
@@ -1763,7 +1766,8 @@ server <- function(input, output, session) {
     tg <- cat_action_target(allow_virtual = FALSE)
     if (is.null(tg)) return()
     ft <- tg$cat$file_type[tg$i]
-    ty <- c(bigwig = "bigWig", bed = "BED", gff3 = "gene", bs = "BorderStrength")[[ft]]
+    ty <- c(bigwig = "bigWig", bed = "BED", gff3 = "gene", bs = "BorderStrength",
+            arc = "Arc")[[ft]]
     if (is.null(ty)) return()
     s_col <- catalog_set_value(tg$cat, tg$i, "color",  tg$ent)
     s_ht  <- suppressWarnings(as.numeric(catalog_set_value(tg$cat, tg$i, "height", tg$ent)))
@@ -1884,7 +1888,7 @@ server <- function(input, output, session) {
       g  <- cat_guess_type(pth)          # same extension rules as the catalog
       ty <- if (is.na(g)) NA_character_
             else c(bigwig = "bigWig", bed = "BED", gff3 = "gene",
-                   bs = "BorderStrength", hic = NA_character_)[[g]]
+                   bs = "BorderStrength", arc = "Arc", hic = NA_character_)[[g]]
       if (is.na(ty)) {
         rv$dl_msg <- sprintf(tr("msg_direct_type"), basename(pth)); return()
       }
@@ -2962,7 +2966,24 @@ server <- function(input, output, session) {
       # tracks); a number -- possibly negative -- fixes it.
       ymin = if (is.null(t$ymin) || !is.finite(t$ymin)) NA else t$ymin,
       agg = if (is.null(t$agg)) "mean" else t$agg,
-      bins = t$bins %||% rv$trk_bins))
+      bins = t$bins %||% rv$trk_bins,
+      # Arc display state. Colours and widths go in as VALUES rather than a
+      # palette name, so a saved figure survives any later change to the
+      # palette table and keeps any per-class override the user made.
+      palette = t$palette %||% ARC_PALETTE_DEFAULT,
+      nclass = t$nclass %||% ARC_NCLASS_DEFAULT,
+      break_rule = t$break_rule %||% "auto",
+      breaks = if (is.null(t$breaks)) NA else as.numeric(t$breaks),
+      arc_colors = if (is.null(t$arc_colors)) NA else as.character(t$arc_colors),
+      arc_widths = if (is.null(t$arc_widths)) NA else as.numeric(t$arc_widths),
+      alpha = t$alpha %||% 0.85,
+      outgoing = t$outgoing %||% "collapse",
+      orientation = t$orientation %||% "down",
+      span_min = if (is.finite(t$span_min %||% NA)) t$span_min else NA,
+      span_max = if (is.finite(t$span_max %||% NA)) t$span_max else NA,
+      score_min = if (is.finite(t$score_min %||% NA)) t$score_min else NA,
+      score_col = t$score_col %||% NA,
+      score_dir = t$score_dir %||% "auto"))
     # bookmarks are places only (see add_bookmark / input$bm_goto)
     bookmarks <- lapply(unname(rv$bookmarks), function(b) list(
       name = b$name, chr = b$chr, chr_y = b$chr_y %||% b$chr,
@@ -3027,7 +3048,24 @@ server <- function(input, output, session) {
         path = t$path, type = t$type %||% "bigWig", color = t$color %||% "darkblue",
         height = t$height %||% 90, ymax = t$ymax %||% 0,
         ymin = suppressWarnings(as.numeric(t$ymin %||% NA))[1], agg = t$agg %||% "mean",
-        bins = t$bins %||% rv$trk_bins)
+        bins = t$bins %||% rv$trk_bins,
+        # older sessions have none of the arc fields; %||% fills every one of
+        # them with the same default a freshly added track would get, so a
+        # pre-arc session file still restores unchanged
+        palette = t$palette %||% ARC_PALETTE_DEFAULT,
+        nclass = t$nclass %||% ARC_NCLASS_DEFAULT,
+        break_rule = t$break_rule %||% "auto",
+        breaks = { v <- suppressWarnings(as.numeric(unlist(t$breaks))); if (length(v) && all(is.finite(v))) v else NULL },
+        arc_colors = { v <- as.character(unlist(t$arc_colors)); if (length(v) && !anyNA(v)) v else NULL },
+        arc_widths = { v <- suppressWarnings(as.numeric(unlist(t$arc_widths))); if (length(v) && all(is.finite(v))) v else NULL },
+        alpha = t$alpha %||% 0.85,
+        outgoing = t$outgoing %||% "collapse",
+        orientation = t$orientation %||% "down",
+        span_min = suppressWarnings(as.numeric(t$span_min %||% NA))[1],
+        span_max = suppressWarnings(as.numeric(t$span_max %||% NA))[1],
+        score_min = suppressWarnings(as.numeric(t$score_min %||% NA))[1],
+        score_col = { v <- t$score_col; if (is.null(v) || length(v) != 1 || is.na(v)) NULL else as.character(v) },
+        score_dir = t$score_dir %||% "auto")
     }
     rv$trk_seq <- n; rv$tracks <- tl
 
@@ -3154,14 +3192,74 @@ server <- function(input, output, session) {
     rv$trk_edit_id <- t$id
     col0 <- if (is.null(t$color)) "darkblue" else t$color
     is_bw <- identical(t$type, "bigWig")
+    is_arc <- identical(t$type, "Arc")
+    if (is_arc) {
+      ad0 <- tryCatch(read_arcs(t$path, t$score_col, t$score_dir %||% "auto"),
+                      error = function(e) NULL)
+      br0 <- t$breaks %||% arc_breaks(if (is.null(ad0)) 1 else ad0$score,
+                                      t$nclass %||% ARC_NCLASS_DEFAULT,
+                                      t$break_rule %||% "auto",
+                                      if (is.null(ad0)) NA else attr(ad0, "arc_count"))
+      cl0 <- t$arc_colors %||% arc_palette(t$palette %||% ARC_PALETTE_DEFAULT, length(br0))
+      wd0 <- t$arc_widths %||% arc_widths(length(br0))
+      # The dialog reads the file through the strength column and direction
+      # CURRENTLY TYPED IN IT, not through the ones the track was opened with.
+      # Naming a different column changes the units the breaks are read in, so
+      # the histogram and the units line have to follow the box as it is typed -
+      # otherwise the only way to see the new distribution would be to apply,
+      # reopen, and start over. read_arcs() caches, so this costs nothing.
+      dlg_arc <- reactive({
+        sc <- trimws(input$trke_arc_scol %||% (t$score_col %||% ""))
+        sd <- input$trke_arc_sdir %||% (t$score_dir %||% "auto")
+        tryCatch(read_arcs(t$path, if (nzchar(sc)) sc else NULL, sd),
+                 error = function(e) NULL)
+      })
+      # The histogram is the whole point of this block: the strength column of
+      # a real HiChIP / ChIA-PET file is massively tied at its minimum, so
+      # choosing class breaks by typing numbers blind is guesswork. Drawing the
+      # distribution with the current breaks on it turns it into one look.
+      output$trke_arc_hist <- renderPlot({
+        ad <- dlg_arc()
+        if (is.null(ad)) return(invisible(NULL))
+        b <- arc_parse_num(input$trke_arc_breaks %||% "")
+        if (!length(b)) b <- br0
+        cc <- arc_parse_col(input$trke_arc_cols %||% "")
+        plot_arc_hist(ad, sort(b), if (length(cc) == length(b)) cc else NULL)
+      })
+      # Which units do the breaks use? A p / q / FDR column arrives converted to
+      # -log10, so "1e-10" would be meaningless where "10" is meant. This line
+      # names the converted column and shows the spread actually present.
+      output$trke_arc_units <- renderUI({
+        ad <- dlg_arc()
+        if (is.null(ad)) return(NULL)
+        if (!isTRUE(attr(ad, "arc_hasscore")))
+          return(tags$small(class = "text-muted", tr("arc_no_score")))
+        g <- function(v) formatC(v, format = "g", digits = 3)
+        tags$small(class = "text-muted",
+          sprintf(tr("arc_breaks_units"), attr(ad, "arc_score"),
+                  g(min(ad$score)), g(stats::median(ad$score)),
+                  g(stats::quantile(ad$score, 0.95, names = FALSE)),
+                  g(max(ad$score))))
+      })
+    }
     showModal(modalDialog(
       title = sprintf("%s  [%s]", t$name, t$type),
-      size = "m", easyClose = TRUE,
+      # Apply no longer closes this dialog, so a stray click on the backdrop
+      # must not close it either: settings here are adjusted in rounds (name a
+      # strength column, look at the histogram, set the breaks, look again) and
+      # losing the dialog mid-round means starting over.
+      size = "m", easyClose = FALSE,
       textInput("trke_name", tr("trk_label"), value = t$name, width = "100%"),
       tags$label(tr("trk_color")),
       color_swatch_grid("trke_color", col0),
       tags$script(sprintf("Shiny.setInputValue('trke_color','%s');", col0)),
-      fluidRow(
+      # An arc track's vertical axis is interaction DISTANCE, not signal, so the
+      # generic Min / Max would be dead controls here. Its axis is set by the
+      # distance range further down, which also decides what is drawn.
+      if (is_arc)
+        fluidRow(column(4, numericInput("trke_height", tr("set_height"),
+                                        t$height, min = 30, step = 10)))
+      else fluidRow(
         column(4, numericInput("trke_height", tr("set_height"),
                                t$height, min = 30, step = 10)),
         # no min= on the two scale fields: a subtraction / log-ratio track needs
@@ -3171,6 +3269,62 @@ server <- function(input, output, session) {
                                if (is.null(t$ymin) || !is.finite(t$ymin)) NULL else t$ymin)),
         column(4, numericInput("trke_max", tr("set_max_auto"),
                                if (is.null(t$ymax)) 0 else t$ymax))),
+      if (is_arc) tagList(
+        # The strength column comes first: it decides the units the breaks below
+        # are read in, so choosing it last meant setting the breaks twice.
+        fluidRow(
+          column(6, textInput("trke_arc_scol", tr("arc_score_col"),
+                              value = t$score_col %||% "", width = "100%")),
+          column(6, selectInput("trke_arc_sdir", tr("arc_score_dir"),
+                    choices = setNames(c("auto", "up", "down"),
+                                       c(tr("arc_dir_auto"), tr("arc_dir_up"),
+                                         tr("arc_dir_down"))),
+                    selected = t$score_dir %||% "auto"))),
+        fluidRow(
+          column(4, selectInput("trke_arc_pal", tr("arc_palette"),
+                                choices = names(ARC_PALETTES),
+                                selected = t$palette %||% ARC_PALETTE_DEFAULT)),
+          column(3, numericInput("trke_arc_n", tr("arc_nclass"),
+                                 value = length(br0), min = 2, max = ARC_NCLASS_MAX, step = 1)),
+          column(5, selectInput("trke_arc_rule", tr("arc_rule"),
+                    choices = setNames(c("auto", "integer", "log", "equal", "manual"),
+                                       c(tr("arc_rule_auto"), tr("arc_rule_int"),
+                                         tr("arc_rule_log"), tr("arc_rule_eq"),
+                                         tr("arc_rule_man"))),
+                    selected = t$break_rule %||% "auto"))),
+        tags$small(class = "text-muted", tr("arc_hist")),
+        plotOutput("trke_arc_hist", height = "130px"),
+        textInput("trke_arc_breaks", tr("arc_breaks"),
+                  value = paste(signif(br0, 6), collapse = ", "), width = "100%"),
+        tags$div(uiOutput("trke_arc_units")),
+        fluidRow(
+          column(7, textInput("trke_arc_cols", tr("arc_colors"),
+                              value = paste(cl0, collapse = ", "), width = "100%")),
+          column(5, textInput("trke_arc_wids", tr("arc_widths"),
+                              value = paste(wd0, collapse = ", "), width = "100%"))),
+        actionButton("trke_arc_fill", tr("arc_fill"), class = "btn-sm"),
+        tags$hr(),
+        fluidRow(
+          column(5, selectInput("trke_arc_out", tr("arc_outgoing"),
+                    choices = setNames(c("collapse", "hide", "full"),
+                                       c(tr("arc_out_collapse"), tr("arc_out_hide"),
+                                         tr("arc_out_full"))),
+                    selected = t$outgoing %||% "collapse")),
+          column(4, selectInput("trke_arc_orient", tr("arc_orient"),
+                    choices = setNames(c("down", "up"),
+                                       c(tr("arc_orient_down"), tr("arc_orient_up"))),
+                    selected = t$orientation %||% "down")),
+          column(3, numericInput("trke_arc_alpha", tr("arc_alpha"),
+                                 value = t$alpha %||% 0.85, min = 0.05, max = 1, step = 0.05))),
+        tags$label(tr("arc_filters")),
+        tags$div(tags$small(class = "text-muted", tr("arc_filters_note"))),
+        fluidRow(
+          column(4, numericInput("trke_arc_smin", tr("arc_span_min"),
+                    value = if (is.finite(t$span_min %||% NA) && t$span_min > 0) t$span_min else NULL)),
+          column(4, numericInput("trke_arc_smax", tr("arc_span_max"),
+                    value = if (is.finite(t$span_max %||% NA)) t$span_max else NULL)),
+          column(4, numericInput("trke_arc_scmin", tr("arc_score_min"),
+                    value = if (is.finite(t$score_min %||% NA)) t$score_min else NULL)))),
       if (is_bw) fluidRow(
         column(6, selectInput("trke_agg", tr("set_agg"),
                     choices = setNames(c("mean", "max"),
@@ -3179,17 +3333,52 @@ server <- function(input, output, session) {
         column(6, numericInput("trke_bins", tr("set_trk_res"),
                                t$bins %||% rv$trk_bins,
                                min = 100, max = 5000, step = 100))),
+      # Apply / Close first; Delete moved to the far end, because a dialog that
+      # now stays open is one the pointer lingers in.
       footer = tagList(
         actionButton("trke_apply", tr("set_apply"), class = "btn-primary"),
-        actionButton("trke_delete", tr("trk_delete"), class = "btn-danger"),
-        modalButton(tr("cat_close")))))
+        modalButton(tr("cat_close")),
+        actionButton("trke_delete", tr("trk_delete"), class = "btn-danger"))))
+  })
+
+  # Palette + class count -> breaks, colours and widths in one press. The three
+  # text fields stay editable afterwards, so the common path is two clicks and
+  # the per-class override is still there for anyone who wants it.
+  observeEvent(input$trke_arc_fill, {
+    t <- rv$tracks[[as.character(rv$trk_edit_id)]]
+    if (is.null(t)) return()
+    sc <- trimws(input$trke_arc_scol %||% (t$score_col %||% ""))
+    ad <- tryCatch(read_arcs(t$path, if (nzchar(sc)) sc else NULL,
+                             input$trke_arc_sdir %||% (t$score_dir %||% "auto")),
+                   error = function(e) NULL)
+    n  <- suppressWarnings(as.integer(input$trke_arc_n))
+    if (!is.finite(n)) n <- ARC_NCLASS_DEFAULT
+    n  <- max(2L, min(ARC_NCLASS_MAX, n))
+    rule <- input$trke_arc_rule %||% "auto"
+    br <- if (identical(rule, "manual")) {
+            b <- arc_parse_num(input$trke_arc_breaks %||% "")
+            if (length(b) >= 2) sort(b)[seq_len(min(n, length(b)))] else NULL
+          } else NULL
+    if (is.null(br))
+      br <- arc_breaks(if (is.null(ad)) seq_len(n) else ad$score, n,
+                       if (identical(rule, "manual")) "auto" else rule,
+                       if (is.null(ad)) NA else attr(ad, "arc_count"))
+    updateTextInput(session, "trke_arc_breaks", value = paste(signif(br, 6), collapse = ", "))
+    updateTextInput(session, "trke_arc_cols",
+                    value = paste(arc_palette(input$trke_arc_pal %||% ARC_PALETTE_DEFAULT,
+                                              length(br)), collapse = ", "))
+    updateTextInput(session, "trke_arc_wids",
+                    value = paste(arc_widths(length(br)), collapse = ", "))
   })
 
   observeEvent(input$trke_apply, {
     k <- as.character(rv$trk_edit_id)
     t <- rv$tracks[[k]]
     if (is.null(t)) return()
-    removeModal()
+    # The dialog deliberately stays open: these settings are found by trying
+    # one, looking at the track, and adjusting - which the old behaviour of
+    # closing on Apply turned into reopening the dialog for every attempt.
+    showNotification(tr("set_applied"), type = "message", duration = 3)
     nv <- input$trke_name
     if (!is.null(nv) && nzchar(nv)) t$name <- nv
     cv <- input$trke_color
@@ -3206,6 +3395,34 @@ server <- function(input, output, session) {
       if (!is.null(av) && av %in% c("mean", "max")) t$agg <- av
       bv <- suppressWarnings(as.numeric(input$trke_bins))
       if (length(bv) == 1 && is.finite(bv) && bv >= 50) t$bins <- bv
+    }
+    if (identical(t$type, "Arc")) {
+      if (!is.null(input$trke_arc_pal))  t$palette    <- input$trke_arc_pal
+      if (!is.null(input$trke_arc_rule)) t$break_rule <- input$trke_arc_rule
+      if (!is.null(input$trke_arc_out))  t$outgoing   <- input$trke_arc_out
+      if (!is.null(input$trke_arc_orient)) t$orientation <- input$trke_arc_orient
+      av <- suppressWarnings(as.numeric(input$trke_arc_alpha))
+      if (length(av) == 1 && is.finite(av)) t$alpha <- min(1, max(0.05, av))
+      nv <- suppressWarnings(as.integer(input$trke_arc_n))
+      if (length(nv) == 1 && is.finite(nv)) t$nclass <- max(2L, min(ARC_NCLASS_MAX, nv))
+      br <- sort(arc_parse_num(input$trke_arc_breaks %||% ""))
+      if (length(br) >= 2) { t$breaks <- br; t$nclass <- length(br) }
+      cc <- arc_parse_col(input$trke_arc_cols %||% "")
+      ww <- arc_parse_num(input$trke_arc_wids %||% "")
+      # a class list of the wrong length would silently fall back to the
+      # palette inside the drawing code; refill it here instead so what the
+      # dialog shows next time is what is actually being drawn
+      n <- length(t$breaks %||% br)
+      t$arc_colors <- if (length(cc) == n) cc else arc_palette(t$palette, n)
+      t$arc_widths <- if (length(ww) == n) ww else arc_widths(n)
+      pick <- function(x) { v <- suppressWarnings(as.numeric(x)); if (length(v) == 1 && is.finite(v)) v else NA_real_ }
+      t$span_min  <- pick(input$trke_arc_smin)
+      t$span_max  <- pick(input$trke_arc_smax)
+      t$score_min <- pick(input$trke_arc_scmin)
+      sc <- trimws(input$trke_arc_scol %||% "")
+      t$score_col <- if (nzchar(sc)) sc else NULL
+      if (!is.null(input$trke_arc_sdir)) t$score_dir <- input$trke_arc_sdir
+      rv$arc_warned[[k]] <- NULL      # a new strength column deserves a fresh check
     }
     rv$tracks[[k]] <- t
   })
@@ -4019,6 +4236,24 @@ server <- function(input, output, session) {
     if (identical(ty, "BorderStrength"))
       withProgress(message = tr("prog_read_bs"), value = 0.5,
                    { tryCatch(read_bs(lp), error = function(e) rv$trk_msg <- sprintf(tr("msg_bs_err"), conditionMessage(e))) })
+    # Interactions: parse up front like the two above. An interaction file is
+    # mostly NOT what ends up on screen - a ChIA-PET cluster file is three
+    # quarters inter-chromosomal, which this track cannot draw - so the note
+    # below reports what was recognised and how much of the file survives,
+    # rather than letting the user wonder why "695,175 rows" became a handful
+    # of arcs.
+    arc_note <- ""
+    if (identical(ty, "Arc")) {
+      ad <- withProgress(message = tr("prog_read_arc"), value = 0.5, {
+              tryCatch(read_arcs(lp), error = function(e) {
+                rv$trk_msg <- sprintf(tr("msg_arc_err"), conditionMessage(e)); NULL }) })
+      if (is.null(ad)) return(invisible(FALSE))
+      ntr <- attr(ad, "arc_trans") %||% 0
+      arc_note <- sprintf(tr("msg_arc_note"), attr(ad, "arc_format"),
+                          attr(ad, "arc_score") %||% "-",
+                          format(nrow(ad), big.mark = ","),
+                          format(nrow(ad) + ntr, big.mark = ","))
+    }
 
     # ---- no Hi-C map open: take the coordinate system from this track -------
     # The first track added defines the chromosomes; we start on the whole of
@@ -4054,8 +4289,24 @@ server <- function(input, output, session) {
     if (length(ht) != 1 || !is.finite(ht) || ht < 20) ht <- 90
     rv$tracks[[as.character(id)]] <- list(id = id, name = nm, path = lp,
       type = ty, color = col, height = ht, ymax = 0, ymin = NA_real_,
-      agg = "mean", bins = rv$trk_bins)   # per-track resolution (editable)
+      agg = "mean", bins = rv$trk_bins,   # per-track resolution (editable)
+      # --- arc-only display state (harmless on the other track types) -------
+      # Colours and widths are stored as VALUES, not as "palette PuBu": a
+      # figure made today has to come back the same after the palette table is
+      # edited, and the per-class overrides have nowhere else to live.
+      palette = ARC_PALETTE_DEFAULT, nclass = ARC_NCLASS_DEFAULT,
+      break_rule = "auto", breaks = NULL, arc_colors = NULL, arc_widths = NULL,
+      alpha = 0.85, outgoing = "collapse", orientation = "down",
+      span_min = 0, span_max = NA_real_, score_min = NA_real_,
+      score_col = NULL, score_dir = "auto")
+    if (identical(ty, "Arc")) {
+      b <- arc_breaks(ad$score, ARC_NCLASS_DEFAULT, "auto", attr(ad, "arc_count"))
+      rv$tracks[[as.character(id)]]$breaks     <- b
+      rv$tracks[[as.character(id)]]$arc_colors <- arc_palette(ARC_PALETTE_DEFAULT, length(b))
+      rv$tracks[[as.character(id)]]$arc_widths <- arc_widths(length(b))
+    }
     rv$trk_msg <- paste0(sprintf(tr("msg_added_track"), nm, ty),
+                         if (nzchar(arc_note)) paste0("\n", arc_note) else "",
                          if (nzchar(chrom_msg)) paste0("\n", chrom_msg) else "")
     # Auto Fit to window: resize the contact map so it + all tracks fit the
     # window. Only meaningful while a contact map is on screen.
@@ -4113,6 +4364,36 @@ server <- function(input, output, session) {
     session$resetBrush("ruler_brush")
   })
 
+  # Interactions, with the file's chromosome names pulled onto the ones the
+  # rest of the app uses ("chr1" in a BEDPE vs "I" in a pombe .hic). Names that
+  # still do not match are reported once - a silently empty track is the worst
+  # way for this to fail.
+  arc_data <- function(t) {
+    d <- read_arcs(t$path, t$score_col, t$score_dir %||% "auto")
+    d <- arc_match_chrom(d, rv$chrinfo)
+    um <- attr(d, "arc_unmatched")
+    if (length(um) && !identical(rv$arc_warned[[as.character(t$id)]], TRUE)) {
+      rv$arc_warned[[as.character(t$id)]] <- TRUE
+      showNotification(sprintf(tr("msg_arc_unmatched"),
+                               paste(utils::head(um, 6), collapse = ", ")),
+                       type = "warning", duration = 8)
+    }
+    d
+  }
+  # every arc-track drawing argument in one place, so the screen and the
+  # printed figure cannot drift apart
+  arc_args <- function(t) list(
+    name = t$name, palette = t$palette %||% ARC_PALETTE_DEFAULT,
+    nclass = t$nclass %||% ARC_NCLASS_DEFAULT,
+    breaks = t$breaks, colors = t$arc_colors, widths = t$arc_widths,
+    break_rule = t$break_rule %||% "auto", alpha = t$alpha %||% 0.85,
+    span_min = if (is.finite(t$span_min %||% NA)) t$span_min else 0,
+    span_max = if (is.finite(t$span_max %||% NA)) t$span_max else Inf,
+    score_min = if (is.finite(t$score_min %||% NA)) t$score_min else -Inf,
+    outgoing = t$outgoing %||% "collapse",
+    orientation = t$orientation %||% "down",
+    color = t$color)
+
   # (re)register a synced renderPlot for each track whenever the set changes
   observeEvent(rv$tracks, {
     for (t in rv$tracks) local({
@@ -4127,6 +4408,9 @@ server <- function(input, output, session) {
         else if (identical(tt$type, "BorderStrength"))
           plot_bs_track(read_bs(tt$path), rv$chr, v$west, v$east,
                         chrlen = rv$chrlen, name = tt$name)
+        else if (identical(tt$type, "Arc"))
+          do.call(plot_arc_track, c(list(arc_data(tt), rv$chr, v$west, v$east,
+                                         chrlen = rv$chrlen), arc_args(tt)))
         else
           plot_track(tt, rv$chr, v$west, v$east, chrlen = rv$chrlen,
                      nbins = tt$bins %||% rv$trk_bins)   # per-track resolution
@@ -4448,6 +4732,10 @@ server <- function(input, output, session) {
                plot_bs_track(read_bs(t$path), chr, s, e,
                              chrlen = chrlen, name = t$name, mar = mar,
                              frame = FALSE, yscale = "axis")
+             else if (identical(t$type, "Arc"))
+               do.call(plot_arc_track,
+                       c(list(arc_data(t), chr, s, e, chrlen = chrlen),
+                         arc_args(t), list(mar = mar, frame = FALSE, yscale = "axis")))
              else
                plot_track(t, chr, s, e, chrlen = chrlen,
                           nbins = t$bins %||% rv$trk_bins,

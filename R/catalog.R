@@ -25,7 +25,7 @@
 # ============================================================================
 
 CAT_REQUIRED   <- c("id", "name", "path")
-CAT_FILE_TYPES <- c("hic", "bigwig", "bed", "gff3", "bs")
+CAT_FILE_TYPES <- c("hic", "bigwig", "bed", "gff3", "bs", "arc")
 # columns shown in the list by default when the catalog has no "#show" row
 # (matched against lower-cased column names; only columns that exist appear)
 CAT_DEFAULT_SHOW <- c("id", "name", "file_type", "experiment_type",
@@ -90,6 +90,14 @@ cat_guess_type <- function(path) {
   if (grepl("\\.(bed|narrowpeak|broadpeak)$", b))             return("bed")
   if (grepl("\\.(gff|gff3|gtf)$", b))                         return("gff3")
   if (grepl("_bs\\.txt$", b))                                 return("bs")
+  # interaction / loop calls drawn as arcs (HiChIP, ChIA-PET, HiCCUPS).
+  # .bedpe is unambiguous; the .txt patterns are the file names the common
+  # callers actually produce (ChIA-PET Tool "*.cluster.*.txt", Juicer
+  # "merged_loops.txt", FitHiChIP "*.interactions.txt").
+  if (grepl("\\.bedpe$", b))                                  return("arc")
+  if (grepl("\\.cluster\\.[^.]*\\.txt$", b))                     return("arc")
+  if (grepl("(^|[._])merged_loops\\.txt$", b))                 return("arc")
+  if (grepl("\\.(loops?|interactions?)\\.txt$", b))              return("arc")
   NA_character_
 }
 

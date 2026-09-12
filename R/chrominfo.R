@@ -9,6 +9,7 @@
 #   BED / bedGraph  : header if present, else the largest end coordinate seen
 #   gene (GFF3)     : largest gene end per chromosome (from the parsed cache)
 #   BorderStrength  : largest bin end per chromosome (from the parsed cache)
+#   Arc             : largest anchor end per chromosome (from the parsed cache)
 #
 # track_chrom_info() returns a NAMED numeric vector  c(<chr> = <length>, ...)
 # in file order (so [1] is the first chromosome of the file), or NULL when the
@@ -72,6 +73,21 @@ track_chrom_info <- function(path, type = "bigWig") {
       return(NULL)
     }
     return(.chrom_from_cols(g$chr, g$end))
+  }
+  if (identical(type, "Arc")) {
+    d <- tryCatch(read_arcs(path),
+                  error = function(e) { .chrominfo_note("Interactions", e); NULL })
+    if (is.null(d) || nrow(d) == 0) {
+      # an interaction file that is ALL trans has rows but nothing cis to draw,
+      # and that is worth saying out loud rather than reporting "empty"
+      if (!is.null(d)) .chrominfo_note(
+        if (isTRUE(attr(d, "arc_trans") > 0))
+          sprintf("interaction file holds no intra-chromosomal pair (%d inter-chromosomal rows dropped)",
+                  attr(d, "arc_trans"))
+        else "interaction file is empty")
+      return(NULL)
+    }
+    return(.chrom_from_cols(d$chr, pmax(d$e1, d$e2)))
   }
   if (identical(type, "BorderStrength")) {
     d <- tryCatch(read_bs(path),
