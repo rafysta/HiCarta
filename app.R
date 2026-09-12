@@ -698,6 +698,14 @@ ui <- function(request) {
     "#cat_url_row .shiny-input-container{width:100%}",
     "#cat_url_row .cat-url-input .form-control{width:100%}",
     "#cat_url_row .btn{flex:0 0 auto; height:34px; white-space:nowrap}",
+    # same one-line layout for the direct-file tab's path boxes
+    ".path-row{display:flex; flex-wrap:wrap; gap:6px; align-items:flex-end;",
+    "  margin-bottom:6px; width:100%; box-sizing:border-box}",
+    ".path-row .form-group{margin-bottom:0}",
+    ".path-row .path-input{flex:1 1 180px; min-width:0}",
+    ".path-row .shiny-input-container{width:100%}",
+    ".path-row .path-input .form-control{width:100%}",
+    ".path-row .btn{flex:0 0 auto; height:34px; white-space:nowrap}",
     # filters fixed at 300px, the list takes every remaining pixel
     "#cat_body_row{display:flex; gap:16px; align-items:flex-start}",
     "#cat_filter_col{flex:0 0 300px; min-width:0}",
@@ -870,13 +878,81 @@ ui <- function(request) {
                 div(id = "cat_list_col",
                     DT::DTOutput("cat_table"), uiOutput("cat_hint"))),
               verbatimTextOutput("status"))),
+          # ---- direct file load: one path, no catalog ---------------------
+          # Everything the catalog's detail dialog can do for a row is offered
+          # here for a file the user names themselves: open a .hic as the map
+          # or as the comparison sample, or add a 1-D track.
+          tabPanel(tr("data_loader_direct"),
+            div(class = "loader-narrow", style = "padding-top:12px;",
+              tags$p(tags$small(tr("direct_help"))),
+
+              tags$h4(tr("direct_hic_title"), style = "margin-top:4px;"),
+              div(class = "path-row",
+                div(class = "path-input",
+                    textInput("dl_hic", tr("direct_hic_path"), value = "",
+                              width = "100%")),
+                if (HAS_SHINYFILES)
+                  shinyFiles::shinyFilesButton("dl_hic_btn", tr("cat_browse"),
+                                               tr("direct_hic_browse"),
+                                               multiple = FALSE, class = "btn-sm")),
+              helpText(tr("direct_hic_multi")),
+              fluidRow(
+                column(6, selectInput("dl_hic_norm", tr("direct_norm"),
+                          choices = setNames(
+                            c("", "NONE", "ICE", "KR", "VC", "VC_SQRT"),
+                            c(tr("direct_auto"), "NONE", "ICE", "KR", "VC", "VC_SQRT")),
+                          selected = "")),
+                column(6, textInput("dl_hic_name", tr("direct_name"), value = ""))),
+              div(style = "margin-bottom:4px;",
+                actionButton("dl_open",   tr("cat_open_btn"), class = "btn-sm btn-primary"),
+                actionButton("dl_open_b", tr("cat_open_b"),   class = "btn-sm")),
+
+              hr(),
+              tags$h4(tr("direct_trk_title")),
+              div(class = "path-row",
+                div(class = "path-input",
+                    textInput("dl_trk", tr("direct_trk_path"), value = "",
+                              width = "100%")),
+                if (HAS_SHINYFILES)
+                  shinyFiles::shinyFilesButton("dl_trk_btn", tr("cat_browse"),
+                                               tr("direct_trk_browse"),
+                                               multiple = FALSE, class = "btn-sm")),
+              fluidRow(
+                column(6, selectInput("dl_trk_type", tr("direct_trk_type"),
+                          choices = setNames(
+                            c("auto", "bigWig", "BED", "gene", "BorderStrength"),
+                            c(tr("direct_auto"), "bigWig", "BED",
+                              tr("direct_type_gene"), tr("direct_type_bs"))),
+                          selected = "auto")),
+                column(6, textInput("dl_trk_name", tr("trk_label"), value = ""))),
+              tags$label(tr("trk_color")),
+              color_swatch_grid("dl_trk_color", "darkblue"),
+              numericInput("dl_trk_height", tr("trk_height"), value = 90,
+                           min = 30, step = 10, width = "170px"),
+              actionButton("dl_trk_add", tr("trk_add"), class = "btn-sm btn-primary"),
+
+              hr(),
+              verbatimTextOutput("dl_status"))),
           # -- save / restore the whole display state as a JSON session file --
           tabPanel(tr("session_tab"),
             div(class = "loader-narrow", style = "padding-top:12px;",
               tags$p(tags$small(tr("session_help"))),
               downloadButton("session_save", tr("session_save"), class = "btn-sm btn-primary"),
               hr(),
-              fileInput("session_file", tr("session_load"), accept = ".json"))))))),
+              # Same path box + Browse pattern as the catalog and the direct
+              # file tab: a session can also live on a share or behind a URL,
+              # and an upload widget would hide where the file came from.
+              tags$label(tr("session_load")),
+              div(class = "path-row",
+                div(class = "path-input",
+                    textInput("session_path", NULL, value = "", width = "100%",
+                              placeholder = tr("session_path_ph"))),
+                if (HAS_SHINYFILES)
+                  shinyFiles::shinyFilesButton("session_file_btn", tr("cat_browse"),
+                                               tr("session_browse"),
+                                               multiple = FALSE, class = "btn-sm"),
+                actionButton("session_load_btn", tr("btn_load"),
+                             class = "btn-sm btn-primary")))))))),
 
   # Same markup sidebarLayout() would emit, but with ids on both columns so the
   # collapse toggle (see #ui_collapse_btn above) can hide the side column and
@@ -968,7 +1044,16 @@ ui <- function(request) {
         div(style = "margin-top:6px;",
           downloadButton("bm_save", tr("bm_save"), class = "btn-sm")),
         div(style = "margin-top:6px;",
-          fileInput("bm_file", tr("bm_load"), accept = ".xlsx"))),
+          tags$label(tr("bm_load")),
+          div(class = "path-row",
+            div(class = "path-input",
+                textInput("bm_path", NULL, value = "", width = "100%",
+                          placeholder = tr("bm_path_ph"))),
+            if (HAS_SHINYFILES)
+              shinyFiles::shinyFilesButton("bm_file_btn", tr("cat_browse"),
+                                           tr("bm_browse"),
+                                           multiple = FALSE, class = "btn-sm"),
+            actionButton("bm_load_btn", tr("btn_load"), class = "btn-sm btn-primary")))),
       conditionalPanel("input.nav == 'Display'",
         tabsetPanel(id = "disp_tab", type = "tabs",
           # -- contact-map display: palette, value scale, map height --
@@ -1078,6 +1163,8 @@ server <- function(input, output, session) {
                        cat_src = NULL, cat_detail_row = NULL,
                        cat_filters = list(), trk_pending = NULL,
                        cat_open_id = NULL, cat_open_entry = NULL,
+                       # dl_msg: status line of the direct-file tab
+                       dl_msg = "",
                        ov = NULL, ov_res = NULL, chr = NULL, chrlen = NULL,
                        # open_src: the dataset currently open (paths joined by
                        #           "|") - do_open() compares against it to tell
@@ -1155,6 +1242,45 @@ server <- function(input, output, session) {
                      error = function(e) NULL)
       if (!is.null(fp) && nrow(fp) > 0)
         updateTextInput(session, "cat_url", value = as.character(fp$datapath[1]))
+    })
+
+    # direct-file tab: .hic picker and track picker
+    shinyFiles::shinyFileChoose(input, "dl_hic_btn", roots = sf_roots,
+                                filetypes = c("hic"))
+    observeEvent(input$dl_hic_btn, {
+      fp <- tryCatch(shinyFiles::parseFilePaths(sf_roots, input$dl_hic_btn),
+                     error = function(e) NULL)
+      if (!is.null(fp) && nrow(fp) > 0)
+        updateTextInput(session, "dl_hic", value = as.character(fp$datapath[1]))
+    })
+    # bookmark exchange (.xlsx) and session restore (.json)
+    shinyFiles::shinyFileChoose(input, "bm_file_btn", roots = sf_roots,
+                                filetypes = c("xlsx"))
+    observeEvent(input$bm_file_btn, {
+      fp <- tryCatch(shinyFiles::parseFilePaths(sf_roots, input$bm_file_btn),
+                     error = function(e) NULL)
+      if (!is.null(fp) && nrow(fp) > 0)
+        updateTextInput(session, "bm_path", value = as.character(fp$datapath[1]))
+    })
+    shinyFiles::shinyFileChoose(input, "session_file_btn", roots = sf_roots,
+                                filetypes = c("json"))
+    observeEvent(input$session_file_btn, {
+      fp <- tryCatch(shinyFiles::parseFilePaths(sf_roots, input$session_file_btn),
+                     error = function(e) NULL)
+      if (!is.null(fp) && nrow(fp) > 0)
+        updateTextInput(session, "session_path", value = as.character(fp$datapath[1]))
+    })
+
+    shinyFiles::shinyFileChoose(input, "dl_trk_btn", roots = sf_roots,
+                                filetypes = c("bw", "bigwig", "bigWig", "bedgraph",
+                                              "bdg", "bed", "narrowPeak",
+                                              "broadPeak", "gff", "gff3", "gtf",
+                                              "txt", "gz"))
+    observeEvent(input$dl_trk_btn, {
+      fp <- tryCatch(shinyFiles::parseFilePaths(sf_roots, input$dl_trk_btn),
+                     error = function(e) NULL)
+      if (!is.null(fp) && nrow(fp) > 0)
+        updateTextInput(session, "dl_trk", value = as.character(fp$datapath[1]))
     })
 
   }
@@ -1626,6 +1752,81 @@ server <- function(input, output, session) {
     # reveal the tracks (do_open does the same for maps)
     if (isTRUE(ok)) session$sendCustomMessage("closeLoader", list())
   })
+
+  # ======== direct file load (Load data > "Direct file") ====================
+  # The catalog is the normal route, but a file that is not in any catalog -
+  # a fresh run, someone else's file, a one-off URL - can be named directly.
+  # These three actions mirror the catalog detail dialog's buttons exactly, so
+  # everything downstream (tiles, bookmarks, export) behaves the same; only the
+  # catalog-provided defaults (set_norm / set_vmax / set_resolution) are absent.
+
+  # one box may hold several paths separated by ";" - the same spelling the
+  # catalog uses for a virtual multi-resolution dataset
+  dl_paths <- function(x) {
+    x <- trimws(x %||% "")
+    if (!nzchar(x)) return(character(0))
+    parts <- trimws(strsplit(gsub("\uff1b", ";", x, fixed = TRUE), ";", fixed = TRUE)[[1]])
+    parts[nzchar(parts)]
+  }
+  dl_display_name <- function(paths) {
+    nm <- tools::file_path_sans_ext(basename(paths[1]))
+    if (length(paths) > 1) sprintf("%s (+%d)", nm, length(paths) - 1L) else nm
+  }
+
+  observeEvent(input$dl_open, {
+    ps <- dl_paths(input$dl_hic)
+    if (!length(ps)) { rv$dl_msg <- tr("msg_direct_no_path"); return() }
+    nm  <- trimws(input$dl_hic_name %||% "")
+    if (!nzchar(nm)) nm <- dl_display_name(ps)
+    nrm <- trimws(input$dl_hic_norm %||% "")
+    rv$cat_src <- ps
+    # a hand-typed path is not a catalog row: a bookmark taken from this view
+    # must fall back to the stored path, not to a stale catalog id
+    rv$cat_open_id <- NULL; rv$cat_open_entry <- NULL
+    do_open(src = ps, norm = if (nzchar(nrm)) nrm else NULL, name = nm)
+    rv$dl_msg <- rv$msg
+  })
+
+  observeEvent(input$dl_open_b, {
+    ps <- dl_paths(input$dl_hic)
+    if (!length(ps)) { rv$dl_msg <- tr("msg_direct_no_path"); return() }
+    # B is always ONE concrete file (no virtual multi-resolution comparison)
+    if (length(ps) > 1)
+      showNotification(tr("cat_b_first_entry"), type = "message", duration = 4)
+    nm  <- trimws(input$dl_hic_name %||% "")
+    if (!nzchar(nm)) nm <- tools::file_path_sans_ext(basename(ps[1]))
+    nrm <- trimws(input$dl_hic_norm %||% "")
+    do_open_b(src = ps[1], norm = if (nzchar(nrm)) nrm else NULL, name = nm)
+    rv$dl_msg <- rv$cmp_msg
+    if (!isTRUE(rv$has_b))
+      showNotification(rv$cmp_msg, type = "warning", duration = 6)
+  })
+
+  observeEvent(input$dl_trk_add, {
+    ps <- dl_paths(input$dl_trk)
+    if (!length(ps)) { rv$dl_msg <- tr("msg_direct_no_path"); return() }
+    pth <- ps[1]
+    ty  <- input$dl_trk_type %||% "auto"
+    if (identical(ty, "auto")) {
+      g  <- cat_guess_type(pth)          # same extension rules as the catalog
+      ty <- if (is.na(g)) NA_character_
+            else c(bigwig = "bigWig", bed = "BED", gff3 = "gene",
+                   bs = "BorderStrength", hic = NA_character_)[[g]]
+      if (is.na(ty)) {
+        rv$dl_msg <- sprintf(tr("msg_direct_type"), basename(pth)); return()
+      }
+    }
+    nm <- trimws(input$dl_trk_name %||% "")
+    ok <- add_track(path = pth, type = ty,
+                    name = if (nzchar(nm)) nm else NULL,
+                    color = input$dl_trk_color %||% "darkblue",
+                    height = input$dl_trk_height)
+    rv$dl_msg <- rv$trk_msg
+    showNotification(rv$trk_msg, type = "message", duration = 4)
+    if (isTRUE(ok)) session$sendCustomMessage("closeLoader", list())
+  })
+
+  output$dl_status <- renderText(rv$dl_msg)
 
 
   # value-scale controls (global vmin/vmax), seeded from an overview read
@@ -2713,10 +2914,11 @@ server <- function(input, output, session) {
     }
   )
 
-  observeEvent(input$session_file, {
-    f <- input$session_file
-    if (is.null(f) || is.null(f$datapath)) return()
-    sess <- tryCatch(jsonlite::fromJSON(f$datapath, simplifyVector = FALSE),
+  observeEvent(input$session_load_btn, {
+    # fromJSON takes a local path or an http(s) URL, so the box accepts both
+    sp <- trimws(input$session_path %||% "")
+    if (!nzchar(sp)) { rv$msg <- tr("msg_session_no_file"); return() }
+    sess <- tryCatch(jsonlite::fromJSON(sp, simplifyVector = FALSE),
                      error = function(e) NULL)
     if (is.null(sess) || !identical(sess$app, "HiCarta")) {
       rv$trk_msg <- tr("msg_session_bad"); rv$msg <- tr("msg_session_bad"); return()
@@ -3295,10 +3497,13 @@ server <- function(input, output, session) {
     content = function(file) writexl::write_xlsx(
       list(bookmarks = bookmarks_to_df(rv$bookmarks)), file))
 
-  observeEvent(input$bm_file, {
-    f <- input$bm_file
-    if (is.null(f) || is.null(f$datapath)) return()
-    res <- tryCatch(read_bookmarks(f$datapath),
+  observeEvent(input$bm_load_btn, {
+    # read_bookmarks() goes through catalog_fetch(), so a path OR a URL works
+    bp <- trimws(input$bm_path %||% "")
+    if (!nzchar(bp)) {
+      showNotification(tr("bm_v_no_file"), type = "error", duration = 5); return()
+    }
+    res <- tryCatch(read_bookmarks(bp),
                     error = function(e) list(ok = FALSE, fatal = conditionMessage(e)))
     if (!isTRUE(res$ok)) {
       showNotification(sprintf(tr("bm_load_err"), res$fatal %||% "?"),

@@ -10,7 +10,7 @@ The typical flow is: load the catalog → click a sample → open it → pan/zoo
 
 ## Data (loader) {#data}
 
-Click the **Data** button at the top to open the loader. It has two tabs: **Data browser** / **Session**.
+Click the **Data** button at the top to open the loader. It has three tabs: **Data browser** / **Direct file** / **Session**.
 
 ### Data browser tab
 
@@ -29,13 +29,23 @@ All data — contact maps and tracks — is opened from the **[data catalog](dat
 
 `set_norm`, `set_vmax`, `set_resolution` from the catalog are applied when a map is opened; without `set_norm` HiCarta picks ICE → KR → Raw automatically from what the file offers.
 
+### Direct file tab
+
+Opens a file that is not in any catalog by naming its path or URL. Catalog `set_*` defaults (normalization, scale maximum, resolution, colour, height) do not apply here — set them afterwards in **Display**.
+
+**Contact map (.hic)** — Type a path or URL (**Browse…** picks a local file), optionally choose a normalization and a display name, then click **Open as contact map** or **Open as comparison (B)**. Several single-resolution files can be opened together as one virtual multi-resolution dataset by separating their paths with `;` (comparison B always uses one file — the first path).
+
+**Track** — Type a path or URL, pick the **Type** (**Auto** decides `bigWig` / `BED` / `gene (GFF3)` / `Border Strength` from the extension), set label, colour and height, then click **Add track**.
+
+Data opened this way can still be bookmarked and saved to a session; because it is not a catalog row, the bookmark records the file path.
+
 ### Session tab
 
 Save and restore the whole view to and from a file.
 
 **Save current view** — Downloads the view state — data source, region, color scale and all tracks — as a `.json` file (named `HiCarta_session_<datetime>.json`).
 
-**Restore from file (.json)** — Choose a saved `.json` to reproduce that entire view.
+**Restore from file (.json)** — Type the path or URL of a saved `.json` (**Browse…** picks a local file) and click **Load** to reproduce that entire view.
 
 ---
 
@@ -61,7 +71,7 @@ Two things work differently on an inter-chromosome map, because it has no diagon
 
 **Step** — Choose the amount each direction button moves, as a fraction of the range in view (**¼ · ½ · 1**).
 
-**Bookmarks** — Save the current view and return to it later. Enter a name in the name field (optional) and register it with **★ Bookmark this view**. A bookmark remembers not only the place but also **which data was open** (catalog id, paths, normalization, resolution, color max), so clicking one restores the whole picture. **Delete** removes one. Bookmarks are also saved in a session, and can be exchanged as Excel: **Save to Excel** downloads the list, **Load from Excel (append)** appends rows from such a file ([details](data-catalog.md#bookmarks-as-excel)).
+**Bookmarks** — Save the current view and return to it later. Enter a name in the name field (optional) and register it with **★ Bookmark this view**. A bookmark remembers not only the place but also **which data was open** (catalog id, paths, normalization, resolution, color max), so clicking one restores the whole picture. **Delete** removes one. Bookmarks are also saved in a session, and can be exchanged as Excel: **Save to Excel** downloads the list, **Load from Excel (append)** takes a path or URL (**Browse…** picks a local file) and, on **Load**, appends the rows of that file ([details](data-catalog.md#bookmarks-as-excel)).
 
 ---
 
