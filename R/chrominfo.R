@@ -89,6 +89,20 @@ track_chrom_info <- function(path, type = "bigWig") {
     }
     return(.chrom_from_cols(d$chr, pmax(d$e1, d$e2)))
   }
+  # Rotated contact map: the .hic header names every chromosome with its exact
+  # length, so a rotated track added first can define the coordinate system on
+  # its own - no contact map has to be opened.
+  if (identical(type, "RotMap")) {
+    ci <- tryCatch(hic_chroms(path),
+                   error = function(e) { .chrominfo_note(".hic header", e); NULL })
+    if (is.null(ci) || is.null(ci$name) || nrow(ci) == 0) {
+      if (!is.null(ci)) .chrominfo_note(".hic header lists no chromosome")
+      return(NULL)
+    }
+    keep <- chrom_is_real(ci$name)      # drop juicer's "All" / "Assembly" row
+    if (!any(keep)) return(NULL)
+    return(.chrom_from_cols(ci$name[keep], ci$length[keep]))
+  }
   if (identical(type, "BorderStrength")) {
     d <- tryCatch(read_bs(path),
                   error = function(e) { .chrominfo_note("Border Strength", e); NULL })

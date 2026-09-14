@@ -61,8 +61,15 @@ parse_igv_xml <- function(src) {
 # Path to store in a track spec when the user adds a track. bigWig is streamed
 # by the native reader, so the URL is kept as-is; every other track type (BED,
 # GFF3, Border Strength) is still parsed whole and needs a local copy.
+#
+# .hic is the important exception. A rotated-map track reads a .hic, and the
+# native reader streams it over HTTP range requests exactly as the main map
+# does - hic_source() is what decides that. Sending it through cache_local()
+# would download a file that can be tens of gigabytes just to draw one panel.
 track_source <- function(path) {
-  if (.bw_native_ok(path)) path else cache_local(path)
+  if (.bw_native_ok(path)) return(path)
+  if (grepl("\\.hic$", tolower(sub("\\?.*$", "", path)))) return(hic_source(path))
+  cache_local(path)
 }
 
 # Read a track over [start,end] on `chr`. Tries the chromosome name as given and

@@ -34,6 +34,7 @@ source("R/tracks.R",      local = TRUE)
 source("R/genes.R",       local = TRUE)
 source("R/borderstrength.R", local = TRUE)
 source("R/arcs.R",        local = TRUE)
+source("R/rotmap.R",      local = TRUE)
 source("R/chrominfo.R",    local = TRUE)
 source("R/export.R",       local = TRUE)
 
@@ -976,10 +977,11 @@ ui <- function(request) {
               fluidRow(
                 column(6, selectInput("dl_trk_type", tr("direct_trk_type"),
                           choices = setNames(
-                            c("auto", "bigWig", "BED", "gene", "BorderStrength", "Arc"),
+                            c("auto", "bigWig", "BED", "gene", "BorderStrength", "Arc",
+                              "RotMap"),
                             c(tr("direct_auto"), "bigWig", "BED",
                               tr("direct_type_gene"), tr("direct_type_bs"),
-                              tr("direct_type_arc"))),
+                              tr("direct_type_arc"), tr("direct_type_rot"))),
                           selected = "auto")),
                 column(6, textInput("dl_trk_name", tr("trk_label"), value = ""))),
               tags$label(tr("trk_color")),
@@ -1681,16 +1683,24 @@ server <- function(input, output, session) {
                      selected = 1)
     } else NULL
     note <- if (is.na(ft)) helpText(tr("cat_not_openable")) else NULL
-    is_track <- !is.na(ft) && ft %in% c("bigwig", "bed", "gff3", "bs")
+    # Which row types can become a track. "arc" was missing here, so an
+    # interaction row never showed the button even though everything behind it
+    # was wired; "hic" is new and becomes the 45-degree rotated map.
+    is_track <- !is.na(ft) && ft %in% c("bigwig", "bed", "gff3", "bs", "arc")
+    is_hic   <- identical(ft, "hic")
     showModal(modalDialog(
       title = cat$data[[cat$name_col]][i],
       size = "m", easyClose = TRUE,
       kv, entry_ui, note,
       footer = tagList(
-        if (identical(ft, "hic")) tagList(
+        # A .hic offers three things, not two: the square map, the comparison
+        # sample, and - through the same cat_add_track handler as every other
+        # track - the rotated map as a track under it.
+        if (is_hic) tagList(
           actionButton("cat_open_main", tr("cat_open_btn"),
                        class = "btn-primary"),
-          actionButton("cat_open_b", tr("cat_open_b"))),
+          actionButton("cat_open_b", tr("cat_open_b")),
+          actionButton("cat_add_track", tr("cat_add_rot"))),
         if (is_track) tagList(
           actionButton("cat_add_track", tr("cat_add_track"),
                        class = "btn-primary"),
@@ -1766,22 +1776,29 @@ server <- function(input, output, session) {
     tg <- cat_action_target(allow_virtual = FALSE)
     if (is.null(tg)) return()
     ft <- tg$cat$file_type[tg$i]
+    # A .hic row can be added as a track too: it becomes the 45-degree rotated
+    # map (the square map is what the Open button gives).
     ty <- c(bigwig = "bigWig", bed = "BED", gff3 = "gene", bs = "BorderStrength",
-            arc = "Arc")[[ft]]
+            arc = "Arc", hic = "RotMap")[[ft]]
     if (is.null(ty)) return()
     s_col <- catalog_set_value(tg$cat, tg$i, "color",  tg$ent)
     s_ht  <- suppressWarnings(as.numeric(catalog_set_value(tg$cat, tg$i, "height", tg$ent)))
     col0  <- if (!is.na(s_col) && nzchar(s_col)) s_col else "darkblue"
-    ht0   <- if (is.finite(s_ht) && s_ht >= 20) s_ht else 90
+    # A rotated map is coloured by a PALETTE (set afterwards in the track's own
+    # settings), not by one colour, and it needs more room than a signal track.
+    is_rot <- identical(ty, "RotMap")
+    ht0   <- if (is.finite(s_ht) && s_ht >= 20) s_ht else if (is_rot) 160 else 90
     rv$trk_pending <- list(path = tg$ps[tg$k], type = ty, color = col0)
     showModal(modalDialog(
       title = sprintf("%s  [%s]", tg$nm, ty),
       size = "m", easyClose = TRUE,
       textInput("trkc_name", tr("trk_label"), value = tg$nm, width = "100%"),
-      tags$label(tr("trk_color")),
-      color_swatch_grid("trkc_color", col0),
+      if (!is_rot) tags$label(tr("trk_color")),
+      if (!is_rot) color_swatch_grid("trkc_color", col0),
       # a fresh dialog must not inherit the colour clicked in a previous one
-      tags$script(sprintf("Shiny.setInputValue('trkc_color','%s');", col0)),
+      if (!is_rot)
+        tags$script(sprintf("Shiny.setInputValue('trkc_color','%s');", col0)),
+      if (is_rot) tags$div(tags$small(class = "text-muted", tr("cat_add_rot_note"))),
       numericInput("trkc_height", tr("trk_height"), value = ht0,
                    min = 30, step = 10),
       footer = tagList(
@@ -1888,7 +1905,7 @@ server <- function(input, output, session) {
       g  <- cat_guess_type(pth)          # same extension rules as the catalog
       ty <- if (is.na(g)) NA_character_
             else c(bigwig = "bigWig", bed = "BED", gff3 = "gene",
-                   bs = "BorderStrength", arc = "Arc", hic = NA_character_)[[g]]
+                   bs = "BorderStrength", arc = "Arc", hic = "RotMap")[[g]]
       if (is.na(ty)) {
         rv$dl_msg <- sprintf(tr("msg_direct_type"), basename(pth)); return()
       }
@@ -2983,7 +3000,19 @@ server <- function(input, output, session) {
       span_max = if (is.finite(t$span_max %||% NA)) t$span_max else NA,
       score_min = if (is.finite(t$score_min %||% NA)) t$score_min else NA,
       score_col = t$score_col %||% NA,
-      score_dir = t$score_dir %||% "auto"))
+      score_dir = t$score_dir %||% "auto",
+      # rotated-map display state (NA = automatic, as in the dialog)
+      dmax = if (is.finite(t$dmax %||% NA)) t$dmax else NA,
+      dmin = if (is.finite(t$dmin %||% NA)) t$dmin else 0,
+      rot_res = if (is.finite(t$rot_res %||% NA)) t$rot_res else NA,
+      rot_norm = t$rot_norm %||% "NONE",
+      rot_pal = t$rot_pal %||% "matlab",
+      rot_unit = t$rot_unit %||% "p",
+      rot_vmax = if (is.finite(t$rot_vmax %||% NA)) t$rot_vmax else 0.95,
+      rot_vmin = if (is.finite(t$rot_vmin %||% NA)) t$rot_vmin else NA,
+      rot_oe = t$rot_oe %||% "none",
+      rot_method = t$rot_method %||% "auto",
+      rot_orient = t$rot_orient %||% "up"))
     # bookmarks are places only (see add_bookmark / input$bm_goto)
     bookmarks <- lapply(unname(rv$bookmarks), function(b) list(
       name = b$name, chr = b$chr, chr_y = b$chr_y %||% b$chr,
@@ -3065,7 +3094,20 @@ server <- function(input, output, session) {
         span_max = suppressWarnings(as.numeric(t$span_max %||% NA))[1],
         score_min = suppressWarnings(as.numeric(t$score_min %||% NA))[1],
         score_col = { v <- t$score_col; if (is.null(v) || length(v) != 1 || is.na(v)) NULL else as.character(v) },
-        score_dir = t$score_dir %||% "auto")
+        score_dir = t$score_dir %||% "auto",
+        # rotated-map fields; a session written before this track type existed
+        # has none of them and %||% supplies exactly the add-time defaults
+        dmax = suppressWarnings(as.numeric(t$dmax %||% NA))[1],
+        dmin = { v <- suppressWarnings(as.numeric(t$dmin %||% 0))[1]; if (is.finite(v)) v else 0 },
+        rot_res = suppressWarnings(as.numeric(t$rot_res %||% NA))[1],
+        rot_norm = t$rot_norm %||% "NONE",
+        rot_pal = t$rot_pal %||% "matlab",
+        rot_unit = t$rot_unit %||% "p",
+        rot_vmax = { v <- suppressWarnings(as.numeric(t$rot_vmax %||% 0.95))[1]; if (is.finite(v)) v else 0.95 },
+        rot_vmin = suppressWarnings(as.numeric(t$rot_vmin %||% NA))[1],
+        rot_oe = t$rot_oe %||% "none",
+        rot_method = t$rot_method %||% "auto",
+        rot_orient = t$rot_orient %||% "up")
     }
     rv$trk_seq <- n; rv$tracks <- tl
 
@@ -3193,6 +3235,19 @@ server <- function(input, output, session) {
     col0 <- if (is.null(t$color)) "darkblue" else t$color
     is_bw <- identical(t$type, "bigWig")
     is_arc <- identical(t$type, "Arc")
+    is_rot <- identical(t$type, "RotMap")
+    # Resolution and normalization menus come from the FILE, not from a fixed
+    # list: a single-resolution .hic offers one, a Juicer file a dozen. Both
+    # lookups are cached by the reader, so opening the dialog costs nothing.
+    if (is_rot) {
+      rot_res_all  <- tryCatch(sort(hic_resolutions(t$path)), error = function(e) numeric(0))
+      rot_norm_all <- tryCatch(hic_norms(t$path), error = function(e) "NONE")
+      # fmt_res() takes one value at a time, so build the labels with vapply -
+      # handing it the whole vector silently uses only the first element
+      rot_res_ch   <- c(setNames("auto", tr("rot_res_auto")),
+                        setNames(as.character(rot_res_all),
+                                 vapply(rot_res_all, fmt_res, character(1))))
+    }
     if (is_arc) {
       ad0 <- tryCatch(read_arcs(t$path, t$score_col, t$score_dir %||% "auto"),
                       error = function(e) NULL)
@@ -3250,15 +3305,24 @@ server <- function(input, output, session) {
       # losing the dialog mid-round means starting over.
       size = "m", easyClose = FALSE,
       textInput("trke_name", tr("trk_label"), value = t$name, width = "100%"),
-      tags$label(tr("trk_color")),
-      color_swatch_grid("trke_color", col0),
-      tags$script(sprintf("Shiny.setInputValue('trke_color','%s');", col0)),
+      if (!is_rot) tags$label(tr("trk_color")),
+      if (!is_rot) color_swatch_grid("trke_color", col0),
+      if (!is_rot)
+        tags$script(sprintf("Shiny.setInputValue('trke_color','%s');", col0)),
       # An arc track's vertical axis is interaction DISTANCE, not signal, so the
       # generic Min / Max would be dead controls here. Its axis is set by the
       # distance range further down, which also decides what is drawn.
-      if (is_arc)
-        fluidRow(column(4, numericInput("trke_height", tr("set_height"),
-                                        t$height, min = 30, step = 10)))
+      if (is_arc || is_rot)
+        fluidRow(
+          column(4, numericInput("trke_height", tr("set_height"),
+                                 t$height, min = 30, step = 10)),
+          if (is_rot)
+            column(8, tags$label(HTML("&nbsp;")),
+                   tags$div(actionButton("trke_rot_fit", tr("rot_fit_height"),
+                                         class = "btn-sm"),
+                            tags$small(class = "text-muted",
+                                       style = "margin-left:8px;",
+                                       tr("rot_fit_note")))))
       else fluidRow(
         column(4, numericInput("trke_height", tr("set_height"),
                                t$height, min = 30, step = 10)),
@@ -3325,6 +3389,53 @@ server <- function(input, output, session) {
                     value = if (is.finite(t$span_max %||% NA)) t$span_max else NULL)),
           column(4, numericInput("trke_arc_scmin", tr("arc_score_min"),
                     value = if (is.finite(t$score_min %||% NA)) t$score_min else NULL)))),
+      if (is_rot) tagList(
+        tags$label(tr("rot_range")),
+        tags$div(tags$small(class = "text-muted", tr("rot_range_note"))),
+        fluidRow(
+          column(4, numericInput("trke_rot_dmin", tr("rot_dmin"),
+                    value = if (is.finite(t$dmin %||% NA) && t$dmin > 0) t$dmin else NULL)),
+          column(4, numericInput("trke_rot_dmax", tr("rot_dmax"),
+                    value = if (is.finite(t$dmax %||% NA)) t$dmax else NULL)),
+          column(4, selectInput("trke_rot_orient", tr("rot_orient"),
+                    choices = setNames(c("up", "down"),
+                                       c(tr("rot_orient_up"), tr("rot_orient_down"))),
+                    selected = t$rot_orient %||% "up"))),
+        tags$hr(),
+        fluidRow(
+          column(6, selectInput("trke_rot_res", tr("rot_res"),
+                    choices = rot_res_ch,
+                    selected = if (is.finite(t$rot_res %||% NA))
+                                 as.character(t$rot_res) else "auto")),
+          column(6, selectInput("trke_rot_norm", tr("rot_norm"),
+                    choices = rot_norm_all,
+                    selected = if ((t$rot_norm %||% "NONE") %in% rot_norm_all)
+                                 t$rot_norm %||% "NONE" else "NONE"))),
+        fluidRow(
+          column(4, selectInput("trke_rot_pal", tr("rot_palette"),
+                    choices = setNames(c("matlab", "red", "blue", "gentle"),
+                                       c("matlab", "red", "blue", "gentle")),
+                    selected = t$rot_pal %||% "matlab")),
+          column(4, selectInput("trke_rot_unit", tr("rot_scale_unit"),
+                    choices = setNames(c("p", "v"),
+                                       c(tr("rot_unit_pct"), tr("rot_unit_val"))),
+                    selected = t$rot_unit %||% "p")),
+          column(4, selectInput("trke_rot_oe", tr("rot_oe"),
+                    choices = setNames(c("none", "oe", "oe_log2"),
+                                       c(tr("rot_oe_off"), tr("rot_oe_on"),
+                                         tr("rot_oe_log2"))),
+                    selected = t$rot_oe %||% "none"))),
+        fluidRow(
+          column(4, numericInput("trke_rot_vmin", tr("rot_vmin"),
+                    value = if (is.finite(t$rot_vmin %||% NA)) t$rot_vmin else NULL)),
+          column(4, numericInput("trke_rot_vmax", tr("rot_vmax"),
+                    value = if (is.finite(t$rot_vmax %||% NA)) t$rot_vmax else 0.95)),
+          column(4, selectInput("trke_rot_method", tr("rot_method"),
+                    choices = setNames(c("auto", "polygon", "raster"),
+                                       c(tr("rot_method_auto"), tr("rot_method_poly"),
+                                         tr("rot_method_ras"))),
+                    selected = t$rot_method %||% "auto"))),
+        tags$div(tags$small(class = "text-muted", tr("rot_scale_note")))),
       if (is_bw) fluidRow(
         column(6, selectInput("trke_agg", tr("set_agg"),
                     choices = setNames(c("mean", "max"),
@@ -3369,6 +3480,23 @@ server <- function(input, output, session) {
                                               length(br)), collapse = ", "))
     updateTextInput(session, "trke_arc_wids",
                     value = paste(arc_widths(length(br)), collapse = ", "))
+  })
+
+  # Height that makes the picture a genuine 45-degree rotation, from the panel
+  # width the client reports and the distance ceiling currently in the dialog.
+  # A button rather than automatic: tying it to the zoom would make the whole
+  # track stack jump every time the view changes.
+  observeEvent(input$trke_rot_fit, {
+    t <- rv$tracks[[as.character(rv$trk_edit_id)]]
+    if (is.null(t)) return()
+    v <- view_range(); if (is.null(v)) return()
+    dm <- suppressWarnings(as.numeric(input$trke_rot_dmax))[1]
+    if (!is.finite(dm) || dm <= 0) dm <- rot_dmax_of(t, v$west, v$east)
+    wpx <- suppressWarnings(as.numeric(
+      session$clientData[[paste0("output_trk_plot_", t$id, "_width")]]))
+    if (length(wpx) != 1 || !is.finite(wpx) || wpx < 100) wpx <- 900
+    h <- rot_auto_height(v$west, v$east, dm, wpx)
+    if (is.finite(h)) updateNumericInput(session, "trke_height", value = h)
   })
 
   observeEvent(input$trke_apply, {
@@ -3423,6 +3551,33 @@ server <- function(input, output, session) {
       t$score_col <- if (nzchar(sc)) sc else NULL
       if (!is.null(input$trke_arc_sdir)) t$score_dir <- input$trke_arc_sdir
       rv$arc_warned[[k]] <- NULL      # a new strength column deserves a fresh check
+    }
+    if (identical(t$type, "RotMap")) {
+      pick <- function(x, lo = -Inf) {
+        v <- suppressWarnings(as.numeric(x))[1]
+        if (is.finite(v) && v > lo) v else NA_real_
+      }
+      t$dmax <- pick(input$trke_rot_dmax, 0)
+      t$dmin <- { v <- pick(input$trke_rot_dmin, -1); if (is.finite(v)) v else 0 }
+      rr <- input$trke_rot_res %||% "auto"
+      t$rot_res <- if (identical(rr, "auto")) NA_real_ else pick(rr, 0)
+      if (!is.null(input$trke_rot_norm))   t$rot_norm   <- input$trke_rot_norm
+      if (!is.null(input$trke_rot_pal))    t$rot_pal    <- input$trke_rot_pal
+      if (!is.null(input$trke_rot_unit))   t$rot_unit   <- input$trke_rot_unit
+      if (!is.null(input$trke_rot_oe))     t$rot_oe     <- input$trke_rot_oe
+      if (!is.null(input$trke_rot_method)) t$rot_method <- input$trke_rot_method
+      if (!is.null(input$trke_rot_orient)) t$rot_orient <- input$trke_rot_orient
+      t$rot_vmin <- pick(input$trke_rot_vmin)
+      # a percentile has to be a probability; an absolute value can be anything
+      vx <- pick(input$trke_rot_vmax)
+      if (identical(t$rot_unit, "p") && is.finite(vx)) {
+        if (vx > 1) vx <- vx / 100
+        vx <- min(max(vx, 0.01), 1)
+      }
+      t$rot_vmax <- if (is.finite(vx)) vx else 0.95
+      # the generic Min / Max are not shown for this type; make sure a value
+      # left over from another track's dialog cannot leak into it
+      t$ymax <- 0; t$ymin <- NA_real_
     }
     rv$tracks[[k]] <- t
   })
@@ -4236,6 +4391,26 @@ server <- function(input, output, session) {
     if (identical(ty, "BorderStrength"))
       withProgress(message = tr("prog_read_bs"), value = 0.5,
                    { tryCatch(read_bs(lp), error = function(e) rv$trk_msg <- sprintf(tr("msg_bs_err"), conditionMessage(e))) })
+    # Rotated map: nothing to parse, but the header has to be readable or the
+    # track would sit there empty. Reading it now also fills the reader's
+    # footer cache, so the first draw is not the one that pays for it.
+    rot_note <- ""
+    rot_meta <- NULL
+    if (identical(ty, "RotMap")) {
+      rot_meta <- withProgress(message = tr("prog_read_hic_hdr"), value = 0.5, {
+        tryCatch(list(chroms = hic_chroms(lp), res = hic_resolutions(lp),
+                      norms = hic_norms(lp)),
+                 error = function(e) {
+                   rv$trk_msg <- sprintf(tr("msg_rot_err"), conditionMessage(e)); NULL })
+      })
+      if (is.null(rot_meta)) return(invisible(FALSE))
+      rot_note <- sprintf(tr("msg_rot_note"),
+                          nrow(rot_meta$chroms),
+                          fmt_res(min(rot_meta$res)),
+                          fmt_res(max(rot_meta$res)),
+                          paste(rot_meta$norms, collapse = ", "))
+    }
+
     # Interactions: parse up front like the two above. An interaction file is
     # mostly NOT what ends up on screen - a ChIA-PET cluster file is three
     # quarters inter-chromosomal, which this track cannot draw - so the note
@@ -4298,7 +4473,25 @@ server <- function(input, output, session) {
       break_rule = "auto", breaks = NULL, arc_colors = NULL, arc_widths = NULL,
       alpha = 0.85, outgoing = "collapse", orientation = "down",
       span_min = 0, span_max = NA_real_, score_min = NA_real_,
-      score_col = NULL, score_dir = "auto")
+      score_col = NULL, score_dir = "auto",
+      # --- rotated-map-only display state (harmless on the other types) -----
+      # dmax / dmin are the distance range: they set BOTH what is drawn and
+      # where the vertical axis ends. NA = automatic (a quarter of the view).
+      dmax = NA_real_, dmin = 0,
+      rot_res = NA_real_, rot_norm = "NONE", rot_pal = "matlab",
+      rot_unit = "p", rot_vmax = 0.95, rot_vmin = NA_real_,
+      rot_oe = "none", rot_method = "auto", rot_orient = "up")
+    if (identical(ty, "RotMap")) {
+      # a rotated map wants more room than a signal track, and its own
+      # normalization should start where the main map's is
+      rv$tracks[[as.character(id)]]$height <-
+        if (is.finite(ht) && ht > 90) ht else 160
+      if (!is.null(rot_meta) && length(rot_meta$norms)) {
+        n0 <- st$norm %||% "NONE"
+        rv$tracks[[as.character(id)]]$rot_norm <-
+          if (n0 %in% rot_meta$norms) n0 else "NONE"
+      }
+    }
     if (identical(ty, "Arc")) {
       b <- arc_breaks(ad$score, ARC_NCLASS_DEFAULT, "auto", attr(ad, "arc_count"))
       rv$tracks[[as.character(id)]]$breaks     <- b
@@ -4307,6 +4500,7 @@ server <- function(input, output, session) {
     }
     rv$trk_msg <- paste0(sprintf(tr("msg_added_track"), nm, ty),
                          if (nzchar(arc_note)) paste0("\n", arc_note) else "",
+                         if (nzchar(rot_note)) paste0("\n", rot_note) else "",
                          if (nzchar(chrom_msg)) paste0("\n", chrom_msg) else "")
     # Auto Fit to window: resize the contact map so it + all tracks fit the
     # window. Only meaningful while a contact map is on screen.
@@ -4394,6 +4588,34 @@ server <- function(input, output, session) {
     orientation = t$orientation %||% "down",
     color = t$color)
 
+  # ---- rotated contact map (RotMap) -----------------------------------------
+  # Same one-place-for-the-arguments discipline as the arc track above: the
+  # screen and the printed figure must not be able to drift apart.
+  rot_dmax_of <- function(t, vstart, vend) {
+    d <- suppressWarnings(as.numeric(t$dmax %||% NA))[1]
+    if (is.finite(d) && d > 0) d else rot_default_dmax(vstart, vend)
+  }
+  rot_band <- function(t, chr, vstart, vend, chrlen = Inf) {
+    rr <- suppressWarnings(as.numeric(t$rot_res %||% NA))[1]
+    read_rot_band(t$path, chr, vstart, vend, rot_dmax_of(t, vstart, vend),
+                  res = if (is.finite(rr) && rr > 0) rr else NULL,
+                  norm = t$rot_norm %||% "NONE",
+                  chrlen = if (is.null(chrlen) || !is.finite(chrlen)) Inf else chrlen)
+  }
+  rot_args <- function(t, vstart, vend) {
+    num <- function(x) { v <- suppressWarnings(as.numeric(x))[1]; if (is.finite(v)) v else NULL }
+    list(name = t$name,
+         dmax = rot_dmax_of(t, vstart, vend),
+         dmin = num(t$dmin) %||% 0,
+         color = t$rot_pal %||% "matlab",
+         unit = t$rot_unit %||% "p",
+         vmin = num(t$rot_vmin),
+         vmax = num(t$rot_vmax) %||% 0.95,
+         oe = if (isTRUE(t$rot_oe %in% c("oe", "oe_log2"))) t$rot_oe else FALSE,
+         method = t$rot_method %||% "auto",
+         orientation = t$rot_orient %||% "up")
+  }
+
   # (re)register a synced renderPlot for each track whenever the set changes
   observeEvent(rv$tracks, {
     for (t in rv$tracks) local({
@@ -4411,6 +4633,11 @@ server <- function(input, output, session) {
         else if (identical(tt$type, "Arc"))
           do.call(plot_arc_track, c(list(arc_data(tt), rv$chr, v$west, v$east,
                                          chrlen = rv$chrlen), arc_args(tt)))
+        else if (identical(tt$type, "RotMap"))
+          do.call(plot_rot_track,
+                  c(list(rot_band(tt, rv$chr, v$west, v$east, rv$chrlen),
+                         rv$chr, v$west, v$east, chrlen = rv$chrlen),
+                    rot_args(tt, v$west, v$east)))
         else
           plot_track(tt, rv$chr, v$west, v$east, chrlen = rv$chrlen,
                      nbins = tt$bins %||% rv$trk_bins)   # per-track resolution
@@ -4736,6 +4963,12 @@ server <- function(input, output, session) {
                do.call(plot_arc_track,
                        c(list(arc_data(t), chr, s, e, chrlen = chrlen),
                          arc_args(t), list(mar = mar, frame = FALSE, yscale = "axis")))
+             else if (identical(t$type, "RotMap"))
+               do.call(plot_rot_track,
+                       c(list(rot_band(t, chr, s, e, chrlen), chr, s, e,
+                              chrlen = chrlen),
+                         rot_args(t, s, e),
+                         list(mar = mar, frame = FALSE, yscale = "axis")))
              else
                plot_track(t, chr, s, e, chrlen = chrlen,
                           nbins = t$bins %||% rv$trk_bins,
