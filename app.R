@@ -162,6 +162,43 @@ user_dirs <- function() {
   out
 }
 
+# ---------------------------------------------------------------------------
+# Drive letters for the file pickers, with the right label next to each.
+#
+# shinyFiles::getVolumes() gets the letters and the labels in two SEPARATE
+# lists and pairs them by position. On Windows without WMIC (Win11 24H2+)
+# it runs  Write-Output $dvr.name $dvr.VolumeLabel  : a drive whose label
+# cannot be read (empty card reader / DVD, disconnected network drive)
+# throws inside the getter and is silently dropped from the label list, so
+# every later drive gets the NEXT drive's label ("SSD-B (D:)" on E: ...).
+# matrix() then recycles without complaint. Here each drive is one line,
+# "letter<TAB>label", so letter and label cannot drift apart. Output is
+# forced to UTF-8 so Japanese volume labels survive. Any failure falls back
+# to shinyFiles.
+# ---------------------------------------------------------------------------
+win_volumes <- function() {
+  fallback <- function() tryCatch(shinyFiles::getVolumes()(),
+                                  error = function(e) character(0))
+  if (!identical(.Platform$OS.type, "windows")) return(fallback())
+  ps <- paste0(
+    "[Console]::OutputEncoding=[Text.Encoding]::UTF8;",
+    "[IO.DriveInfo]::GetDrives() | ForEach-Object {",
+    " $l=''; if ($_.IsReady) { try { $l=$_.VolumeLabel } catch {} };",
+    " $_.Name.Substring(0,2) + [char]9 + $l }")
+  out <- tryCatch(suppressWarnings(system2("powershell",
+           c("-NoProfile", "-NonInteractive", "-Command", shQuote(ps)),
+           stdout = TRUE, stderr = FALSE)), error = function(e) NULL)
+  if (is.null(out) || !length(out)) return(fallback())
+  Encoding(out) <- "UTF-8"
+  out <- sub("\r$", "", out)
+  out <- out[grepl("^[A-Za-z]:\t", out)]
+  if (!length(out)) return(fallback())
+  let <- substr(out, 1, 2)
+  lab <- trimws(substring(out, 4))
+  nm  <- ifelse(nzchar(lab), paste0(lab, " (", let, ")"), paste0("(", let, ")"))
+  stats::setNames(paste0(let, "/"), nm)
+}
+
 color_swatch_grid <- function(input_id, selected) {
   cols <- TRK_PALETTE
   if (!is.null(selected) && nzchar(selected) && !(selected %in% cols))
@@ -1297,7 +1334,7 @@ server <- function(input, output, session) {
                   stats::setNames(normalizePath("~", winslash = "/",
                                                 mustWork = FALSE),
                                   tr("dir_home")),
-                  shinyFiles::getVolumes()())
+                  win_volumes())
     sf_roots <- sf_roots[!duplicated(sf_roots) & !duplicated(names(sf_roots))]
 
     # catalog picker (.xlsx) for the Data panel
