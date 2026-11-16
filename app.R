@@ -61,7 +61,7 @@ cfg_or <- function(k, d) if (!is.null(CFG[[k]]) && nzchar(CFG[[k]])) CFG[[k]] el
 # any other keys already in the file are preserved so nothing is lost.
 write_config <- function(path, values) {
   known <- c("language", "catalog_url", "hic_engine", "igv_genome",
-             "aws_profile", "aws_region", "plugin_dir")
+             "aws_profile", "aws_region", "plugin_dir", "favorite_dirs")
   cur   <- read_config(path)
   extra <- cur[setdiff(names(cur), known)]
   v <- function(k) { x <- values[[k]]; if (is.null(x)) "" else trimws(as.character(x)) }
@@ -96,7 +96,11 @@ write_config <- function(path, values) {
     "# Plugins: a folder of R files, each registering a track type with",
     "# hicarta_plugin() (see docs/plugins.md). Empty = the plugins/ folder next",
     "# to app.R. Files are re-read on every page reload.",
-    sprintf("plugin_dir = %s", v("plugin_dir")))
+    sprintf("plugin_dir = %s", v("plugin_dir")),
+    "",
+    "# Favourite folders, listed first in every Browse dialog.",
+    "#   name = path; name = path; ...   (or just paths; the folder name is used)",
+    sprintf("favorite_dirs = %s", v("favorite_dirs")))
   if (length(extra))
     lines <- c(lines, "", "# Other settings",
                vapply(names(extra),
@@ -154,6 +158,59 @@ TRK_PALETTE <- local({
 # the OneDrive root and then to the plain home-relative path. Anything that
 # does not exist is simply left out, so this is safe on every platform.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Favourite folders (config.txt  favorite_dirs).
+#
+# Stored on one line as  "name = path; name = path"  (";" cannot occur in a
+# Windows path, and only the FIRST "=" splits name from path). A bare path is
+# allowed and is labelled with its folder name. In the settings dialog the same
+# list is edited one entry per line. Folders that do not exist (an unplugged
+# drive, a renamed project) are left out silently, so a stale entry never
+# breaks the Browse dialogs.
+# ---------------------------------------------------------------------------
+fav_parse <- function(s) {
+  if (is.null(s) || length(s) == 0 || is.na(s[1])) return(character(0))
+  parts <- trimws(unlist(strsplit(as.character(s), "[;\r\n]+")))
+  parts <- parts[nzchar(parts)]
+  out <- character(0)
+  for (p in parts) {
+    # "name = path" unless the "=" is really part of a path (C:/a=b is unusual
+    # but legal): split only when what follows looks like a path.
+    nm <- ""; pth <- p
+    if (grepl("=", p, fixed = TRUE)) {
+      a <- trimws(sub("=.*$", "", p)); b <- trimws(sub("^[^=]*=", "", p))
+      if (nzchar(b) && grepl("^([A-Za-z]:|[/\\~])", b)) { nm <- a; pth <- b }
+    }
+    pth <- gsub("^[\"']|[\"']$", "", pth)          # pasted with quotes
+    pth <- normalizePath(path.expand(pth), winslash = "/", mustWork = FALSE)
+    if (!nzchar(nm)) nm <- basename(pth)
+    out <- c(out, stats::setNames(pth, nm))
+  }
+  out
+}
+
+# one line for config.txt from the dialog's one-entry-per-line text
+fav_join <- function(txt) {
+  f <- fav_parse(txt)
+  if (!length(f)) return("")
+  paste(sprintf("%s = %s", names(f), unname(f)), collapse = "; ")
+}
+
+# the dialog's text from the config line
+fav_lines <- function(s) {
+  f <- fav_parse(s)
+  if (!length(f)) return("")
+  paste(sprintf("%s = %s", names(f), unname(f)), collapse = "\n")
+}
+
+# roots for shinyFiles: existing folders only, marked with a star
+fav_roots <- function(s) {
+  f <- fav_parse(s)
+  f <- f[dir.exists(f)]
+  if (!length(f)) return(character(0))
+  stats::setNames(unname(f), paste0("\u2605 ", names(f)))
+}
+
 user_dirs <- function() {
   home <- normalizePath("~", winslash = "/", mustWork = FALSE)
   reg  <- if (identical(.Platform$OS.type, "windows"))
@@ -1390,7 +1447,11 @@ server <- function(input, output, session) {
     # Desktop / Documents / Downloads first (that is where a file being picked
     # for a one-off almost always is), then Home, then the drives. Duplicates
     # are dropped by PATH so a redirected Desktop cannot appear twice.
-    sf_roots <- c(user_dirs(),
+    # Favourites come first: they are the folders the user chose to keep a
+    # click away. Read from config.txt here (per session), so saving them in
+    # the settings dialog - which reloads the page - takes effect at once.
+    sf_roots <- c(fav_roots(read_config(file.path(getwd(), "config.txt"))[["favorite_dirs"]]),
+                  user_dirs(),
                   stats::setNames(normalizePath("~", winslash = "/",
                                                 mustWork = FALSE),
                                   tr("dir_home")),
@@ -3822,6 +3883,14 @@ server <- function(input, output, session) {
             sprintf(tr("cfg_plugins_loaded"), length(ids), paste(ids, collapse = ", "))
           else sprintf(tr("cfg_plugins_none"), plugin_dir())))
       }),
+      textAreaInput("cfg_favorite_dirs", tr("cfg_favorites"),
+                    value = fav_lines(cur_get("favorite_dirs")),
+                    rows = 3, width = "100%",
+                    placeholder = "Retreat = C:/Users/me/Documents/retreat"),
+      if (HAS_SHINYFILES)
+        shinyFiles::shinyDirButton("cfg_fav_add", tr("cfg_fav_add"),
+                                   tr("cfg_fav_add"), class = "btn-sm"),
+      p(tags$small(tr("cfg_favorites_hint"))),
       tags$label(tr("cfg_raw")),
       tags$pre(style = "max-height:180px;overflow:auto;background:#f7f7f7;padding:8px;", raw),
       footer = tagList(
@@ -3850,7 +3919,25 @@ server <- function(input, output, session) {
     igv_genome     = input$cfg_igv_genome,
     aws_profile    = input$cfg_aws_profile,
     aws_region     = input$cfg_aws_region,
-    plugin_dir     = input$cfg_plugin_dir))
+    plugin_dir     = input$cfg_plugin_dir,
+    favorite_dirs  = fav_join(input$cfg_favorite_dirs)))
+
+  # "Add folder..." in the settings dialog: pick a folder and append it as a
+  # new line, so nobody has to type a long path by hand.
+  if (HAS_SHINYFILES) {
+    shinyFiles::shinyDirChoose(input, "cfg_fav_add", roots = sf_roots)
+    observeEvent(input$cfg_fav_add, {
+      d <- tryCatch(shinyFiles::parseDirPath(sf_roots, input$cfg_fav_add),
+                    error = function(e) character(0))
+      if (!length(d) || !nzchar(d[1])) return()
+      d <- normalizePath(as.character(d[1]), winslash = "/", mustWork = FALSE)
+      cur <- input$cfg_favorite_dirs %||% ""
+      line <- sprintf("%s = %s", basename(d), d)
+      if (d %in% unname(fav_parse(cur))) return()
+      updateTextAreaInput(session, "cfg_favorite_dirs",
+        value = if (nzchar(trimws(cur))) paste0(sub("\\s+$", "", cur), "\n", line) else line)
+    })
+  }
 
   # Apply & save: write config.txt, then reload the page. Because the UI is a
   # per-request function that re-reads config.txt and re-sets the language on

@@ -67,3 +67,8 @@
 # plugins/ (virtual4c.R, table_signal.R); the manual's "Plugins" page has the
 # API. Empty / unset = the plugins/ folder next to app.R.
 #plugin_dir = plugins
+
+# Favourite folders, listed first (marked with a star) in every Browse dialog.
+#   name = path; name = path; ...   (or just paths; the folder name is used)
+# Also editable in the in-app settings dialog (one per line there).
+#favorite_dirs = Retreat = C:/Users/me/Documents/retreat; Data = H:/work/Project

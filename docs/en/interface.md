@@ -16,7 +16,7 @@ Click the **Data** button at the top to open the loader. It has three tabs: **Da
 
 All data — contact maps and tracks — is opened from the **[data catalog](data-catalog.md)**, an Excel file in which one row = one sample.
 
-**Load the catalog** — The path/URL field starts with `catalog_url` from `config.txt`; **Browse…** picks a local file (the location list starts with **Desktop / Documents / Downloads / Home** and then the drives; on Windows a Desktop redirected into OneDrive is found correctly). Click **Load** to (re)read it. Broken rows are excluded and listed with the sample name and the reason.
+**Load the catalog** — The path/URL field starts with `catalog_url` from `config.txt`; **Browse…** picks a local file (the location list starts with your **favourite folders** (★), then **Desktop / Documents / Downloads / Home** and the drives; on Windows a Desktop redirected into OneDrive is found correctly). Click **Load** to (re)read it. Broken rows are excluded and listed with the sample name and the reason.
 
 **Filter and search** — The left sidebar has an incremental sample-name search, an all-columns search (comments included), dropdown filters generated from the catalog's own columns, and a date-range filter. All conditions combine; each dropdown only offers values that still match the other conditions.
 
@@ -155,6 +155,7 @@ Click **Edit config file…** to view and edit the app's startup defaults (`conf
 - **Default catalog (.xlsx) URL / path** — The data catalog loaded by default in the Data browser.
 - **Remote file reading** — Stream over the network (default) or download whole files first.
 - **IGV genome id** — Sent along with "Open in IGV" (e.g. `hg38`; empty = don't send).
+- **Favourite folders** — Listed first, marked ★, in every **Browse…** dialog. One per line, `name = path` (or just the path). **Add folder…** picks one for you. Folders that do not exist are skipped.
 
 Clicking **Apply & save** reloads the page and applies the settings (any map or tracks currently loaded are closed at that point).
 

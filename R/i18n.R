@@ -441,6 +441,10 @@ LANG_STRINGS <- list(
     cfg_aws_none     = "No AWS credentials found: only public data can be read.",
     # ---- plugins (user-defined track types, R/plugins.R) ----
     cfg_plugin_dir     = "Plugin folder (R files registering track types; empty = plugins/ next to app.R)",
+    cfg_favorites      = "Favourite folders (listed first in every Browse dialog)",
+    cfg_fav_add        = "Add folder…",
+    cfg_favorites_hint = paste0("One per line: name = path (or just the path). ",
+                                "Folders that do not exist are skipped."),
     cfg_plugins_loaded = "%d plugin(s) loaded: %s. Edit a plugin file, then reload the page.",
     cfg_plugins_none   = "No plugin loaded (folder: %s). See the manual, \"Plugins\".",
     plugin_params      = "Plugin parameters",
@@ -933,6 +937,10 @@ LANG_STRINGS <- list(
     cfg_aws_none     = "AWS の認証情報が見つかりません。公開データのみ読み込めます。",
     # ---- プラグイン（R で書く独自トラック、R/plugins.R） ----
     cfg_plugin_dir     = "プラグインのフォルダ（トラック種別を登録する R ファイルを置く。空欄 = app.R と同じ場所の plugins/）",
+    cfg_favorites      = "お気に入りのフォルダ（参照ダイアログの先頭に表示）",
+    cfg_fav_add        = "フォルダを追加…",
+    cfg_favorites_hint = paste0("1 行に 1 つ: 表示名 = パス（パスだけでも可）。",
+                                "存在しないフォルダは表示されません。"),
     cfg_plugins_loaded = "プラグイン %d 件を読み込み済み: %s。ファイルを編集したらページを再読み込みしてください。",
     cfg_plugins_none   = "プラグインは読み込まれていません（フォルダ: %s）。マニュアルの「プラグイン」を参照。",
     plugin_params      = "プラグインのパラメータ",
