@@ -91,6 +91,25 @@ HiCarta のデータは、コンタクトマップもトラックもすべて**�
 
 ---
 
+## 非公開の S3 データを読む
+
+`path` には、公開 URL のほかに **`s3://バケット名/キー`** の形で Amazon S3 上のファイルを書けます（例: `s3://uo-cgf/P/020/NAME/NAME.hic`）。`.hic`・bigWig・BED などすべての種類で使え、カタログ自体を S3 に置くこともできます。
+
+- **公開されているファイル**は、これまでどおり認証なしで読みます。`https://….amazonaws.com/…` の URL でも `s3://` でも構いません。
+- **公開されていないファイル**は、PC に置いた AWS のアクセスキーで署名して読みます。読めるかどうかは S3 側の権限（ラボ・P01 などのグループ）で決まり、権限が無いと「権限がない」旨のメッセージが出ます。
+- `https://` の S3 URL で書いたファイルが後から非公開になっても、鍵があれば同じ URL のまま読めます。
+
+アクセスキーの置き場所（AWS CLI と同じファイル）:
+
+```ini
+# Windows: %USERPROFILE%\.aws\credentials   Mac: ~/.aws/credentials
+[hicarta]
+aws_access_key_id     = AKIA...
+aws_secret_access_key = ...
+```
+
+**設定 → 設定ファイルを編集…** の「AWS プロファイル」に `hicarta` と入力して保存します（空欄なら `[default]`）。設定画面には、鍵が見つかったかどうかが表示されます。鍵は `config.txt` には保存されません。リージョンは自動で判定されます。
+
 ## IGV で開く
 
 トラック行の詳細表示には **IGV で開く**ボタンがあります。ファイル（と現在表示中の領域）を、**起動済みの IGV デスクトップ**に IGV のリモートポート経由で送ります。HiCarta が IGV を起動することはありません — IGV は自分で起動し、一度だけポートを有効にしてください：*View → Preferences → Advanced → 「Enable port」*（既定 60151）。`config.txt`（または **Setting → Edit config file…**）の `igv_genome` を設定すると、読み込むゲノムも IGV に伝えます。

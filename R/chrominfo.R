@@ -64,6 +64,14 @@ track_chrom_info <- function(path, type = "bigWig") {
   type <- as.character(type)[1]
   .chrominfo_reset()
 
+  # ---- plugin track: its own chroms(path), else by the file kind it accepts
+  if (exists("is_plugin_type") && is_plugin_type(type)) {
+    ci <- tryCatch(plugin_chrom_info(path, type),
+                   error = function(e) { .chrominfo_note("plugin", e); NULL })
+    if (is.null(ci) || length(ci) == 0) .chrominfo_note("plugin gave no chromosome")
+    return(ci)
+  }
+
   # ---- already-parsed formats: use the cached table ------------------------
   if (identical(type, "gene")) {
     g <- tryCatch(read_genes(path)$genes,

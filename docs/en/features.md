@@ -96,6 +96,12 @@ Remote `.hic` and bigWig files are downloaded and cached locally once on first o
 
 → [Load a Hi-C map](usage.md#load-hic)
 
+## Add your own track types (plugins)
+
+A plugin is a small R file: one function reads the data for the region on screen, one draws it, and HiCarta handles the catalog, the settings dialog, sessions and export. Two ship with HiCarta — a chr/start/end/value table and a virtual 4C profile read from the `.hic` — and each lab can add its own.
+
+→ [Plugins](plugins.md)
+
 ## Switch the interface language
 
 You can switch the interface between Japanese and English.

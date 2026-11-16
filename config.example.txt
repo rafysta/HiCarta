@@ -44,3 +44,26 @@
 # custom .json/.genome file registered in IGV. Leave unset to let IGV keep
 # whatever genome is currently loaded.
 #igv_genome = hg38
+
+# Private data on Amazon S3. Catalog paths may be written as
+#   s3://bucket/key                      (e.g. s3://uo-cgf/P/020/NAME/NAME.hic)
+# or as ordinary S3 https URLs. Public objects are read exactly as before; for
+# objects that are not public HiCarta signs the request with your AWS access
+# key. Put the key in  ~/.aws/credentials  (Windows: %USERPROFILE%\.aws\credentials):
+#   [hicarta]
+#   aws_access_key_id     = AKIA...
+#   aws_secret_access_key = ...
+# and name the profile here. Empty = AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+# environment variables, else AWS_PROFILE, else [default].
+# The region is found automatically; set it only to skip the first redirect.
+#aws_profile = hicarta
+#aws_region = us-west-2
+
+# Plugins: your own track types written in R. Every *.R file in this folder
+# is read at start-up (and again on each page reload); each file registers
+# one or more track types with hicarta_plugin(). A catalog row whose
+# file_type is a plugin id is then offered as "Add as track", and the type
+# also appears in Load data > Direct file > Type. Two examples ship in
+# plugins/ (virtual4c.R, table_signal.R); the manual's "Plugins" page has the
+# API. Empty / unset = the plugins/ folder next to app.R.
+#plugin_dir = plugins

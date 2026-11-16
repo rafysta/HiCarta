@@ -22,6 +22,7 @@ suppressWarnings(suppressMessages({
 HAS_SHINYFILES <- requireNamespace("shinyFiles", quietly = TRUE)
 
 source("R/i18n.R",        local = TRUE)
+source("R/s3.R",          local = TRUE)   # s3:// + signed S3 requests
 source("R/hic_reader.R",  local = TRUE)
 source("R/bigwig_reader.R", local = TRUE)
 source("R/readers.R",     local = TRUE)
@@ -37,6 +38,7 @@ source("R/arcs.R",        local = TRUE)
 source("R/rotmap.R",      local = TRUE)
 source("R/chrominfo.R",    local = TRUE)
 source("R/export.R",       local = TRUE)
+source("R/plugins.R",      local = TRUE)   # user-defined track types (plugins/)
 
 APP_VERSION <- "4.0 (2026-07)"
 # Online manual (MkDocs site built from docs/ by .github/workflows/docs.yml)
@@ -58,7 +60,8 @@ cfg_or <- function(k, d) if (!is.null(CFG[[k]]) && nzchar(CFG[[k]])) CFG[[k]] el
 # Rewrite config.txt from the in-app dialog. Known keys get friendly comments;
 # any other keys already in the file are preserved so nothing is lost.
 write_config <- function(path, values) {
-  known <- c("language", "catalog_url", "hic_engine", "igv_genome")
+  known <- c("language", "catalog_url", "hic_engine", "igv_genome",
+             "aws_profile", "aws_region", "plugin_dir")
   cur   <- read_config(path)
   extra <- cur[setdiff(names(cur), known)]
   v <- function(k) { x <- values[[k]]; if (is.null(x)) "" else trimws(as.character(x)) }
@@ -81,7 +84,19 @@ write_config <- function(path, values) {
     "",
     "# Genome id sent along with \"Open in IGV\" requests (e.g. hg38, mm10, or",
     "# a custom .json/.genome path registered in IGV). Empty = don't send one.",
-    sprintf("igv_genome = %s", v("igv_genome")))
+    sprintf("igv_genome = %s", v("igv_genome")),
+    "",
+    "# Private S3 data (s3://bucket/key, or S3 URLs that are not public).",
+    "# Profile name in ~/.aws/credentials (Windows: %USERPROFILE%\\.aws\\credentials);",
+    "# empty = AWS_ACCESS_KEY_ID env vars, else AWS_PROFILE, else [default].",
+    "# Region empty = automatic. Keys themselves never go in this file.",
+    sprintf("aws_profile = %s", v("aws_profile")),
+    sprintf("aws_region = %s", v("aws_region")),
+    "",
+    "# Plugins: a folder of R files, each registering a track type with",
+    "# hicarta_plugin() (see docs/plugins.md). Empty = the plugins/ folder next",
+    "# to app.R. Files are re-read on every page reload.",
+    sprintf("plugin_dir = %s", v("plugin_dir")))
   if (length(extra))
     lines <- c(lines, "", "# Other settings",
                vapply(names(extra),
@@ -96,6 +111,16 @@ set_language(cfg_or("language", "en"))
 # How remote .hic files are read (see R/readers.R). Re-applied per session below
 # so the settings dialog takes effect on reload without restarting R.
 set_hic_engine(cfg_or("hic_engine", "native"))
+# AWS credentials for private S3 data (R/s3.R); re-applied per session below.
+set_s3_config(cfg_or("aws_profile", ""), cfg_or("aws_region", ""))
+# User-defined track types (R/plugins.R): every *.R in the plugin folder is
+# read now and again on each page load (see ui()), so editing a plugin only
+# needs a browser reload. config.txt "plugin_dir" names the folder; empty =
+# plugins/ next to app.R.
+load_plugins(cfg_or("plugin_dir", NULL))
+# Type names as the user sees them: a plugin track shows its label, not
+# the internal "plugin:<id>".
+trk_type_label <- function(ty) if (is_plugin_type(ty)) plugin_label(ty) else ty
 TRK_COLORS  <- c("darkblue", "steelblue", "firebrick", "red", "darkgreen",
                  "seagreen", "purple", "magenta", "orange", "goldenrod", "black", "grey40")
 
@@ -759,6 +784,10 @@ ui <- function(request) {
   set_language(if (!is.null(cfg[["language"]]) && nzchar(cfg[["language"]]))
                  cfg[["language"]] else "en")
   DEFAULT_CATALOG   <- if (!is.null(cfg[["catalog_url"]]))    cfg[["catalog_url"]]    else ""
+  # plugins are re-read here so that a plugin edited while HiCarta runs takes
+  # effect on the next page reload (the type menu below is built from them)
+  load_plugins(if (!is.null(cfg[["plugin_dir"]]) && nzchar(cfg[["plugin_dir"]]))
+                 cfg[["plugin_dir"]] else NULL)
   fluidPage(
   tags$head(tags$style(HTML(
     ".leaflet-container{background:#fff}", ".nav-pills>li>a{padding:6px 14px}",
@@ -1013,12 +1042,14 @@ ui <- function(request) {
                                                multiple = FALSE, class = "btn-sm")),
               fluidRow(
                 column(6, selectInput("dl_trk_type", tr("direct_trk_type"),
-                          choices = setNames(
+                          # built-in types first, then one entry per plugin
+                          choices = c(setNames(
                             c("auto", "bigWig", "BED", "gene", "BorderStrength", "Arc",
                               "RotMap"),
                             c(tr("direct_auto"), "bigWig", "BED",
                               tr("direct_type_gene"), tr("direct_type_bs"),
                               tr("direct_type_arc"), tr("direct_type_rot"))),
+                            plugin_choices()),
                           selected = "auto")),
                 column(6, textInput("dl_trk_name", tr("trk_label"), value = ""))),
               tags$label(tr("trk_color")),
@@ -1215,6 +1246,17 @@ ui <- function(request) {
           tags$li(tr("about_feat3")),
           tags$li(tr("about_feat4"))),
         tags$hr(),
+        # user-defined track types found in the plugin folder, with the load
+        # result per file (a plugin that failed says why here)
+        local({
+          lines <- plugin_report_text()
+          tagList(
+            p(tags$small(tags$b(sprintf(tr("about_plugins"), plugin_dir())))),
+            if (length(lines))
+              tags$ul(style = "font-size:12px;", lapply(lines, tags$li))
+            else p(tags$small(tr("about_no_plugins"))))
+        }),
+        tags$hr(),
         p(tags$small(tr("about_built"))))
     )),
     div(id = "main_col", class = "col-sm-9", role = "main",
@@ -1243,7 +1285,25 @@ server <- function(input, output, session) {
   # dialog saves config.txt and calls session$reload(), which starts a new
   # session but does NOT re-run the top-level script -- so without this the
   # change would only take effect after restarting R.
-  set_hic_engine(read_config(file.path(getwd(), "config.txt"))[["hic_engine"]])
+  local({
+    cf <- read_config(file.path(getwd(), "config.txt"))
+    set_hic_engine(cf[["hic_engine"]])
+    # Same for the AWS profile; s3_forget() also re-reads ~/.aws/credentials,
+    # so keys added while HiCarta is running work after a page reload.
+    set_s3_config(cf[["aws_profile"]] %||% "", cf[["aws_region"]] %||% "")
+    s3_forget()
+  })
+  # A plugin file that failed to load is said once per session, with the
+  # reason; the About panel repeats it. Loaded plugins are silent.
+  local({
+    bad <- plugin_failures()
+    if (length(bad))
+      showNotification(
+        sprintf(tr("plugin_load_failed"),
+                paste(vapply(bad, function(r) sprintf("%s: %s", r$file, r$error),
+                             character(1)), collapse = "\n")),
+        type = "warning", duration = 12)
+  })
 
   rv <- reactiveValues(msg = tr("msg_start"),
                        # ---- Excel data catalog ----
@@ -1723,7 +1783,8 @@ server <- function(input, output, session) {
     # Which row types can become a track. "arc" was missing here, so an
     # interaction row never showed the button even though everything behind it
     # was wired; "hic" is new and becomes the 45-degree rotated map.
-    is_track <- !is.na(ft) && ft %in% c("bigwig", "bed", "gff3", "bs", "arc")
+    # A plugin id in file_type is a track too (R/plugins.R).
+    is_track <- !is.na(ft) && ft %in% c("bigwig", "bed", "gff3", "bs", "arc", plugin_ids())
     is_hic   <- identical(ft, "hic")
     showModal(modalDialog(
       title = cat$data[[cat$name_col]][i],
@@ -1814,20 +1875,35 @@ server <- function(input, output, session) {
     if (is.null(tg)) return()
     ft <- tg$cat$file_type[tg$i]
     # A .hic row can be added as a track too: it becomes the 45-degree rotated
-    # map (the square map is what the Open button gives).
-    ty <- c(bigwig = "bigWig", bed = "BED", gff3 = "gene", bs = "BorderStrength",
-            arc = "Arc", hic = "RotMap")[[ft]]
-    if (is.null(ty)) return()
+    # map (the square map is what the Open button gives). A plugin id becomes
+    # that plugin's track type.
+    ty <- if (!is.na(ft) && ft %in% plugin_ids()) plugin_type(ft)
+          else unname(c(bigwig = "bigWig", bed = "BED", gff3 = "gene",
+                        bs = "BorderStrength", arc = "Arc", hic = "RotMap")[ft])
+    if (is.null(ty) || length(ty) != 1 || is.na(ty)) return()
     s_col <- catalog_set_value(tg$cat, tg$i, "color",  tg$ent)
     s_ht  <- suppressWarnings(as.numeric(catalog_set_value(tg$cat, tg$i, "height", tg$ent)))
-    col0  <- if (!is.na(s_col) && nzchar(s_col)) s_col else "darkblue"
+    plg   <- plugin_get(ty)                 # NULL unless a plugin type
+    col0  <- if (!is.na(s_col) && nzchar(s_col)) s_col
+             else if (!is.null(plg)) plg$color else "darkblue"
     # A rotated map is coloured by a PALETTE (set afterwards in the track's own
     # settings), not by one colour, and it needs more room than a signal track.
     is_rot <- identical(ty, "RotMap")
-    ht0   <- if (is.finite(s_ht) && s_ht >= 20) s_ht else if (is_rot) 160 else 90
-    rv$trk_pending <- list(path = tg$ps[tg$k], type = ty, color = col0)
+    ht0   <- if (is.finite(s_ht) && s_ht >= 20) s_ht else if (is_rot) 160
+             else if (!is.null(plg)) plg$height else 90
+    # plugin parameters: one catalog column set_<name> per parameter the
+    # plugin declares in `defaults`; absent / empty = the plugin's default
+    pp <- NULL
+    if (!is.null(plg)) {
+      pp <- list()
+      for (nm in names(plg$defaults)) {
+        v <- catalog_set_value(tg$cat, tg$i, nm, tg$ent)
+        if (!is.na(v) && nzchar(v)) pp[[nm]] <- v
+      }
+    }
+    rv$trk_pending <- list(path = tg$ps[tg$k], type = ty, color = col0, params = pp)
     showModal(modalDialog(
-      title = sprintf("%s  [%s]", tg$nm, ty),
+      title = sprintf("%s  [%s]", tg$nm, trk_type_label(ty)),
       size = "m", easyClose = TRUE,
       textInput("trkc_name", tr("trk_label"), value = tg$nm, width = "100%"),
       if (!is_rot) tags$label(tr("trk_color")),
@@ -1880,7 +1956,7 @@ server <- function(input, output, session) {
     removeModal()
     ok <- add_track(path = p$path, type = p$type, name = input$trkc_name,
                     color = input$trkc_color %||% p$color,
-                    height = input$trkc_height)
+                    height = input$trkc_height, params = p$params)
     rv$trk_pending <- NULL
     showNotification(rv$trk_msg, type = "message", duration = 4)
     # reveal the tracks (do_open does the same for maps)
@@ -1941,6 +2017,7 @@ server <- function(input, output, session) {
     if (identical(ty, "auto")) {
       g  <- cat_guess_type(pth)          # same extension rules as the catalog
       ty <- if (is.na(g)) NA_character_
+            else if (g %in% plugin_ids()) plugin_type(g)   # a plugin claimed the extension
             else c(bigwig = "bigWig", bed = "BED", gff3 = "gene",
                    bs = "BorderStrength", arc = "Arc", hic = "RotMap")[[g]]
       if (is.na(ty)) {
@@ -3021,6 +3098,9 @@ server <- function(input, output, session) {
       ymin = if (is.null(t$ymin) || !is.finite(t$ymin)) NA else t$ymin,
       agg = if (is.null(t$agg)) "mean" else t$agg,
       bins = t$bins %||% rv$trk_bins,
+      # plugin parameters, as the user typed / the catalog gave them (strings
+      # or numbers); an empty list means "all defaults"
+      params = if (is.list(t$params) && length(t$params)) t$params else NULL,
       # Arc display state. Colours and widths go in as VALUES rather than a
       # palette name, so a saved figure survives any later change to the
       # palette table and keeps any per-class override the user made.
@@ -3115,6 +3195,8 @@ server <- function(input, output, session) {
         height = t$height %||% 90, ymax = t$ymax %||% 0,
         ymin = suppressWarnings(as.numeric(t$ymin %||% NA))[1], agg = t$agg %||% "mean",
         bins = t$bins %||% rv$trk_bins,
+        # plugin parameters (a JSON object -> named list; absent -> defaults)
+        params = { v <- t$params; if (is.list(v) && length(v) && !is.null(names(v))) v else list() },
         # older sessions have none of the arc fields; %||% fills every one of
         # them with the same default a freshly added track would get, so a
         # pre-arc session file still restores unchanged
@@ -3219,7 +3301,7 @@ server <- function(input, output, session) {
             tags$span(class = "trk-chip-color",
                       style = paste0("background:",
                                      if (is.null(t$color)) "darkblue" else t$color, ";")),
-            tags$span(sprintf("%s  [%s]", t$name, t$type)))),
+            tags$span(sprintf("%s  [%s]", t$name, trk_type_label(t$type))))),
         tags$script(HTML(paste0(
           "(function(){",
           " var box = document.getElementById('trk_chips');",
@@ -3273,6 +3355,11 @@ server <- function(input, output, session) {
     is_bw <- identical(t$type, "bigWig")
     is_arc <- identical(t$type, "Arc")
     is_rot <- identical(t$type, "RotMap")
+    is_plg <- is_plugin_type(t$type)
+    # a plugin's parameters are edited as text, one box per name the plugin
+    # declared; empty = the plugin's default (R/plugins.R coerces the text
+    # back to the default's type)
+    plg_params <- if (is_plg) plugin_params_text(t) else list()
     # Resolution and normalization menus come from the FILE, not from a fixed
     # list: a single-resolution .hic offers one, a Juicer file a dozen. Both
     # lookups are cached by the reader, so opening the dialog costs nothing.
@@ -3335,7 +3422,7 @@ server <- function(input, output, session) {
       })
     }
     showModal(modalDialog(
-      title = sprintf("%s  [%s]", t$name, t$type),
+      title = sprintf("%s  [%s]", t$name, trk_type_label(t$type)),
       # Apply no longer closes this dialog, so a stray click on the backdrop
       # must not close it either: settings here are adjusted in rounds (name a
       # strength column, look at the histogram, set the breaks, look again) and
@@ -3481,6 +3568,14 @@ server <- function(input, output, session) {
         column(6, numericInput("trke_bins", tr("set_trk_res"),
                                t$bins %||% rv$trk_bins,
                                min = 100, max = 5000, step = 100))),
+      if (is_plg && length(plg_params)) tagList(
+        tags$label(tr("plugin_params")),
+        tags$div(tags$small(class = "text-muted", tr("plugin_params_hint"))),
+        do.call(tagList, lapply(names(plg_params), function(nm)
+          textInput(paste0("trke_pp_", nm), nm,
+                    value = plg_params[[nm]], width = "100%")))),
+      if (is_plg && nzchar(plugin_get(t$type)$description %||% ""))
+        tags$div(tags$small(class = "text-muted", plugin_get(t$type)$description)),
       # Apply / Close first; Delete moved to the far end, because a dialog that
       # now stays open is one the pointer lingers in.
       footer = tagList(
@@ -3560,6 +3655,17 @@ server <- function(input, output, session) {
       if (!is.null(av) && av %in% c("mean", "max")) t$agg <- av
       bv <- suppressWarnings(as.numeric(input$trke_bins))
       if (length(bv) == 1 && is.finite(bv) && bv >= 50) t$bins <- bv
+    }
+    if (is_plugin_type(t$type)) {
+      # every declared parameter comes back as text; blank = default (so the
+      # override is dropped rather than stored as "")
+      plg <- plugin_get(t$type)
+      pp <- list()
+      for (nm in names(if (is.null(plg)) list() else plg$defaults)) {
+        v <- input[[paste0("trke_pp_", nm)]]
+        if (!is.null(v) && nzchar(trimws(v))) pp[[nm]] <- trimws(v)
+      }
+      t$params <- pp
     }
     if (identical(t$type, "Arc")) {
       if (!is.null(input$trke_arc_pal))  t$palette    <- input$trke_arc_pal
@@ -3697,6 +3803,25 @@ server <- function(input, output, session) {
       }),
       p(tags$small(tr("cfg_engine_hint"))),
       textInput("cfg_igv_genome", tr("cfg_igv_genome"), value = cur_get("igv_genome")),
+      textInput("cfg_aws_profile", tr("cfg_aws_profile"), value = cur_get("aws_profile")),
+      textInput("cfg_aws_region",  tr("cfg_aws_region"),  value = cur_get("aws_region")),
+      local({
+        st <- tryCatch(s3_status(), error = function(e) list(have = FALSE,
+                         credentials_file = "~/.aws/credentials"))
+        p(tags$small(sprintf(tr("cfg_aws_hint"), st$credentials_file)), tags$br(),
+          tags$small(if (isTRUE(st$have))
+            sprintf(tr("cfg_aws_found"),
+                    if (identical(st$source, "environment")) "AWS_ACCESS_KEY_ID"
+                    else sprintf("profile '%s'", st$profile), st$key_id)
+          else tr("cfg_aws_none")))
+      }),
+      textInput("cfg_plugin_dir", tr("cfg_plugin_dir"), value = cur_get("plugin_dir")),
+      local({
+        ids <- plugin_ids()
+        p(tags$small(if (length(ids))
+            sprintf(tr("cfg_plugins_loaded"), length(ids), paste(ids, collapse = ", "))
+          else sprintf(tr("cfg_plugins_none"), plugin_dir())))
+      }),
       tags$label(tr("cfg_raw")),
       tags$pre(style = "max-height:180px;overflow:auto;background:#f7f7f7;padding:8px;", raw),
       footer = tagList(
@@ -3722,7 +3847,10 @@ server <- function(input, output, session) {
     language       = input$cfg_language,
     catalog_url    = input$cfg_catalog_url,
     hic_engine     = input$cfg_engine,
-    igv_genome     = input$cfg_igv_genome))
+    igv_genome     = input$cfg_igv_genome,
+    aws_profile    = input$cfg_aws_profile,
+    aws_region     = input$cfg_aws_region,
+    plugin_dir     = input$cfg_plugin_dir))
 
   # Apply & save: write config.txt, then reload the page. Because the UI is a
   # per-request function that re-reads config.txt and re-sets the language on
@@ -4406,7 +4534,8 @@ server <- function(input, output, session) {
   # ---------------- 1-D tracks (bigWig / BED), synced to the map x-range ------
   # Add one track (from the catalog's track-settings dialog; name/color/height
   # default to the catalog's set_ columns when present).
-  add_track <- function(path, type, name = NULL, color = NULL, height = NULL) {
+  add_track <- function(path, type, name = NULL, color = NULL, height = NULL,
+                        params = NULL) {
     if (is.null(path) || !nzchar(path)) {
       rv$trk_msg <- tr("msg_enter_track"); return(invisible(FALSE)) }
     bad <- odd_path(path)
@@ -4496,12 +4625,17 @@ server <- function(input, output, session) {
     id <- rv$trk_seq
     nm <- if (!is.null(name) && nzchar(name)) name
           else tools::file_path_sans_ext(basename(path))
-    col <- if (is.null(color) || !nzchar(color)) "darkblue" else color
+    plg <- plugin_get(ty)                 # NULL unless this is a plugin track
+    col <- if (is.null(color) || !nzchar(color)) (if (!is.null(plg)) plg$color else "darkblue")
+           else color
     ht  <- suppressWarnings(as.numeric(height))
-    if (length(ht) != 1 || !is.finite(ht) || ht < 20) ht <- 90
+    if (length(ht) != 1 || !is.finite(ht) || ht < 20)
+      ht <- if (!is.null(plg)) plg$height else 90
     rv$tracks[[as.character(id)]] <- list(id = id, name = nm, path = lp,
       type = ty, color = col, height = ht, ymax = 0, ymin = NA_real_,
       agg = "mean", bins = rv$trk_bins,   # per-track resolution (editable)
+      # --- plugin parameters (named list of overrides; empty = defaults) ---
+      params = if (is.list(params)) params else list(),
       # --- arc-only display state (harmless on the other track types) -------
       # Colours and widths are stored as VALUES, not as "palette PuBu": a
       # figure made today has to come back the same after the palette table is
@@ -4675,6 +4809,9 @@ server <- function(input, output, session) {
                   c(list(rot_band(tt, rv$chr, v$west, v$east, rv$chrlen),
                          rv$chr, v$west, v$east, chrlen = rv$chrlen),
                     rot_args(tt, v$west, v$east)))
+        else if (is_plugin_type(tt$type))
+          # user-defined track (R/plugins.R): same x range, own read + draw
+          plugin_draw(tt, rv$chr, v$west, v$east, chrlen = rv$chrlen)
         else
           plot_track(tt, rv$chr, v$west, v$east, chrlen = rv$chrlen,
                      nbins = tt$bins %||% rv$trk_bins)   # per-track resolution
@@ -5006,6 +5143,9 @@ server <- function(input, output, session) {
                               chrlen = chrlen),
                          rot_args(t, s, e),
                          list(mar = mar, frame = FALSE, yscale = "axis")))
+             else if (is_plugin_type(t$type))
+               plugin_draw(t, chr, s, e, chrlen = chrlen,
+                           mar = mar, frame = FALSE, yscale = "axis")
              else
                plot_track(t, chr, s, e, chrlen = chrlen,
                           nbins = t$bins %||% rv$trk_bins,

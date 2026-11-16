@@ -35,6 +35,8 @@ here <- tryCatch(dirname(normalizePath(sub("^--file=", "", grep("^--file=",
           commandArgs(FALSE), value = TRUE)[1]))), error = function(e) ".")
 src <- file.path(here, "..", "R", "bigwig_reader.R")
 if (!file.exists(src)) src <- "R/bigwig_reader.R"
+s3src <- file.path(dirname(src), "s3.R")          # remote_fetch() for URLs
+if (file.exists(s3src)) source(s3src)
 source(src)
 
 have_rtl <- requireNamespace("rtracklayer", quietly = TRUE) &&

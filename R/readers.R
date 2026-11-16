@@ -104,15 +104,15 @@ hic_cache_dir <- function() {
 
 # Generic: download a remote file once to the cache, preserving its extension.
 cache_local <- function(path, ext = tools::file_ext(path)) {
-  if (is.null(path) || !grepl("^https?://", path)) return(path)
+  if (is.null(path) || !is_remote_path(path)) return(path)
   key  <- paste0(tools::file_path_sans_ext(basename(path)), "_",
                  abs(sum(utf8ToInt(path))) %% 100000L,
                  if (nzchar(ext)) paste0(".", ext) else "")
   dest <- file.path(hic_cache_dir(), key)
   if (file.exists(dest) && file.info(dest)$size > 0) return(dest)
-  tmp <- paste0(dest, ".part")
-  utils::download.file(path, tmp, mode = "wb", quiet = FALSE)
-  file.rename(tmp, dest)
+  # remote_download() (R/s3.R) signs private S3 objects; plain URLs as before.
+  message("[cache] downloading ", path)
+  remote_download(path, dest)
   dest
 }
 
@@ -184,7 +184,10 @@ hic_engine <- function() {
 # Path handed to the readers for a given source. The native engine streams the
 # URL as-is; only the "download" engine materialises it in _hic_cache first.
 hic_source <- function(src) {
-  if (hic_engine() == "download") hic_local(src) else src
+  # strawr cannot sign requests, so a private s3:// object is materialised
+  # locally for every engine except native.
+  if (hic_engine() == "download" ||
+      (hic_engine() != "native" && is_s3_uri(src))) hic_local(src) else src
 }
 
 # Metadata accessors. Prefer the native reader: it parses the footer once and
@@ -192,7 +195,7 @@ hic_source <- function(src) {
 hic_resolutions <- function(path) {
   if (.hic_native()) {
     r <- tryCatch(sort(hic_meta(hic_reader(path))$resolutions),
-                  error = function(e) NULL)
+                  error = function(e) { .rethrow_remote(e); NULL })
     if (length(r)) return(r)
   }
   if (!.have_strawr()) .no_strawr("list resolutions")
@@ -210,26 +213,29 @@ hic_resolutions <- function(path) {
 hic_resolutions_chr <- function(path, chr, normalization = "NONE", chr2 = chr) {
   if (.hic_native()) {
     r <- tryCatch(hic_chr_resolutions(hic_reader(path), chr, chr2, normalization),
-                  error = function(e) NULL)
+                  error = function(e) { .rethrow_remote(e); NULL })
     if (length(r)) return(sort(r))
   }
-  tryCatch(hic_resolutions(path), error = function(e) numeric(0))
+  tryCatch(hic_resolutions(path),
+           error = function(e) { .rethrow_remote(e); numeric(0) })
 }
 
 hic_norms <- function(path) {
   if (.hic_native()) {
-    r <- tryCatch(hic_meta(hic_reader(path))$norms, error = function(e) NULL)
+    r <- tryCatch(hic_meta(hic_reader(path))$norms,
+                  error = function(e) { .rethrow_remote(e); NULL })
     if (length(r)) return(r)
   }
   # Never hand a URL to strawr::readHicNormTypes(): ~30 s CPU, wrong answer.
-  if (grepl("^https?://", path)) return("NONE")
+  if (is_remote_path(path)) return("NONE")
   if (!.have_strawr()) return("NONE")
   tryCatch(strawr::readHicNormTypes(path), error = function(e) "NONE")
 }
 
 hic_chroms <- function(path) {
   if (.hic_native()) {
-    r <- tryCatch(hic_meta(hic_reader(path))$chroms, error = function(e) NULL)
+    r <- tryCatch(hic_meta(hic_reader(path))$chroms,
+                  error = function(e) { .rethrow_remote(e); NULL })
     if (!is.null(r)) return(r)
   }
   if (!.have_strawr()) .no_strawr("list chromosomes")
@@ -246,7 +252,7 @@ read_hic_map <- function(path, chr, start = 1, end = NA, resolution = 10000,
   # No strawr requirement here any more: .hic is read by the native reader
   # (R/hic_reader.R) and strawr is only an optional fallback. Remote files do
   # need curl, though.
-  if (grepl("^https?://", path) && !requireNamespace("curl", quietly = TRUE)) {
+  if (is_remote_path(path) && !requireNamespace("curl", quietly = TRUE)) {
     stop("Reading a .hic over http(s) needs the 'curl' package. ",
          "Run Rscript R/install_libraries.R", call. = FALSE)
   }
@@ -318,6 +324,7 @@ read_hic_map <- function(path, chr, start = 1, end = NA, resolution = 10000,
                   resolution = resolution, normalization = normalization,
                   unit = unit),
       error = function(e) {
+        .rethrow_remote(e)               # no access / download failed: say so
         message("[hic] native reader failed (", conditionMessage(e),
                 ") - falling back to strawr for ", basename(path))
         NULL
@@ -325,7 +332,7 @@ read_hic_map <- function(path, chr, start = 1, end = NA, resolution = 10000,
     if (!is.null(out)) return(out)
   }
   if (!.have_strawr()) .no_strawr(sprintf("read %s", basename(path)))
-  p <- if (hic_engine() == "download") hic_local(path) else path
+  p <- if (hic_engine() == "download" || is_s3_uri(path)) hic_local(path) else path
   strawr::straw(normalization, p,
                 sprintf("%s:%.0f:%.0f", chr,  start,  end),
                 sprintf("%s:%.0f:%.0f", chr2, start2, end2),

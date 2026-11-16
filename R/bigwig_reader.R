@@ -107,7 +107,7 @@ BBI_RTREE_MAGIC <- 0x2468ACE0
 # ---------------------------------------------------------------------------
 # byte source: reused curl handle (remote) or open connection (local)
 # ---------------------------------------------------------------------------
-.bw_is_url <- function(p) grepl("^https?://", p)
+.bw_is_url <- function(p) grepl("^(https?|s3)://", p, ignore.case = TRUE)   # s3:// see R/s3.R
 
 .bw_range <- function(rd, pos, n) {
   n <- as.numeric(n)
@@ -126,12 +126,9 @@ BBI_RTREE_MAGIC <- 0x2468ACE0
     seek(rd$con, where = pos, origin = "start")
     return(readBin(rd$con, "raw", n = n))
   }
-  curl::handle_setheaders(rd$handle,
-    Range = sprintf("bytes=%.0f-%.0f", pos, pos + n - 1))
-  r <- curl::curl_fetch_memory(rd$path, handle = rd$handle)
-  if (!(r$status_code %in% c(200L, 206L)))
-    stop(sprintf("HTTP %d while reading %s", r$status_code, rd$path),
-         call. = FALSE)
+  r <- remote_fetch(rd$target, rd$handle,
+                    range = sprintf("bytes=%.0f-%.0f", pos, pos + n - 1))
+  if (!(r$status_code %in% c(200L, 206L))) remote_stop(rd$target, r)
   if (is.null(rd$size)) {
     h  <- curl::parse_headers_list(r$headers)
     cr <- h[["content-range"]]
@@ -489,6 +486,7 @@ bw_open <- function(path, max_blocks = 256L) {
   if (rd$remote) {
     if (!requireNamespace("curl", quietly = TRUE))
       stop("reading bigWig over http(s) needs the 'curl' package", call. = FALSE)
+    rd$target <- remote_target(path)
     rd$handle <- curl::new_handle()
     curl::handle_setopt(rd$handle, useragent = "HiCarta", followlocation = TRUE,
                         tcp_keepalive = TRUE, connecttimeout = 20L)

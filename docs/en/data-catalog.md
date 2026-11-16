@@ -135,6 +135,25 @@ list of regions by hand, or share it with collaborators.
 
 ---
 
+## Private data on Amazon S3
+
+Besides public URLs, `path` can name an Amazon S3 object as **`s3://bucket/key`** (e.g. `s3://uo-cgf/P/020/NAME/NAME.hic`). This works for every file type (`.hic`, bigWig, BED, …), and the catalog itself can live on S3 too.
+
+- **Public files** are read without credentials, exactly as before, whether written as an `https://….amazonaws.com/…` URL or as `s3://`.
+- **Files that are not public** are read with an AWS access key stored on your computer, which HiCarta uses to sign the request. Whether you may read a file is decided by its permissions on S3 (lab, P01, …); without permission you get a message saying so.
+- If a file written as an `https://` S3 URL is later made private, the same URL keeps working for anyone who has a key.
+
+Where the key goes (the same file the AWS CLI uses):
+
+```ini
+# Windows: %USERPROFILE%\.aws\credentials   Mac: ~/.aws/credentials
+[hicarta]
+aws_access_key_id     = AKIA...
+aws_secret_access_key = ...
+```
+
+Enter `hicarta` as the **AWS profile** under **Setting → Edit config file…** and save (empty = `[default]`). The dialog shows whether a key was found. The key itself is never stored in `config.txt`. The region is detected automatically.
+
 ## Open in IGV
 
 For track rows the detail view offers **Open in IGV**: the file (and the region

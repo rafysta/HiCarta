@@ -30,6 +30,8 @@ suppressWarnings(suppressMessages({
 }))
 src <- file.path(here, "..", "R", "hic_reader.R")
 if (!file.exists(src)) src <- "R/hic_reader.R"
+s3src <- file.path(dirname(src), "s3.R")          # remote_fetch() for URLs
+if (file.exists(s3src)) source(s3src)
 source(src)
 
 have_strawr <- requireNamespace("strawr", quietly = TRUE)

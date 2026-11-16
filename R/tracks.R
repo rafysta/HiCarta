@@ -11,7 +11,11 @@
 #   <Global><Category name="..."><Resource name="X" path="Y.bw"/>...</Category></Global>
 # Returns data.frame(name, path, type) with type inferred from the extension.
 parse_igv_xml <- function(src) {
-  con <- if (grepl("^https?://", src)) url(src) else src
+  con <- src
+  if (is_remote_path(src)) {                 # signed for private S3 (R/s3.R)
+    con <- tempfile(fileext = ".xml"); on.exit(unlink(con), add = TRUE)
+    remote_download(src, con)
+  }
   txt <- paste(readLines(con, warn = FALSE), collapse = "\n")
   getattr <- function(x, a) {
     ok <- grepl(paste0(a, '="'), x); out <- rep(NA_character_, length(x))
@@ -81,6 +85,7 @@ track_source <- function(path) {
   if (.bw_native_ok(path)) {
     iv <- tryCatch(bw_intervals(bw_reader(path), chr, start, end),
                    error = function(e) {
+                     .rethrow_remote(e)
                      message("[track] native bigWig reader failed (",
                              conditionMessage(e), ") - falling back to rtracklayer")
                      NULL
@@ -130,6 +135,7 @@ track_source <- function(path) {
       }
       bw_summary(rd, cand[1], start, end, nbins, type)
     }, error = function(e) {
+      .rethrow_remote(e)
       message("[track] native bigWig summary failed (", conditionMessage(e),
               ") - falling back to rtracklayer")
       NULL

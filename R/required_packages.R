@@ -19,6 +19,7 @@ HICARTA_REQUIRED <- c(
   "data.table", "RColorBrewer",           # binning, palettes
   "jsonlite",                             # session save / restore (.json)
   "curl",                                 # HTTP range reads for remote files
+  "digest",                               # AWS SigV4 signing (R/s3.R); comes with shiny
   "shinyFiles",                           # local file picker dialogs
   "readxl",                               # Excel data catalog (.xlsx)
   "writexl",                              # bookmark / catalog .xlsx export

@@ -77,7 +77,9 @@ R/
   chrominfo.R         chromosome names/lengths from a track file (no-map mode)
   juicer_menu.R       legacy Juicer menu parser (for conversion scripts)
   i18n.R              interface strings (English / Japanese)
+  plugins.R           user-defined track types (plugins/*.R, see docs/plugins.md)
   install_libraries.R installs required packages
+plugins/              example plugins: virtual 4C, chr/start/end/value table
 scripts/              converters (catalog <-> legacy formats, hic200 -> .hic)
 docs/                 documentation source (served via GitHub Pages / MkDocs)
 sample/               small test fixtures (S. pombe)
@@ -142,6 +144,7 @@ with the scripts in `scripts/` (see
 - [docs/usage.md](docs/en/usage.md) — full usage walkthrough
 - [docs/data-catalog.md](docs/en/data-catalog.md) — the Excel data catalog
 - [docs/data-formats.md](docs/en/data-formats.md) — supported formats & conversion
+- [docs/plugins.md](docs/en/plugins.md) — write your own track types in R (plugins)
 
 ---
 

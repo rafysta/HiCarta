@@ -26,6 +26,10 @@
 
 CAT_REQUIRED   <- c("id", "name", "path")
 CAT_FILE_TYPES <- c("hic", "bigwig", "bed", "gff3", "bs", "arc")
+# the built-in types plus every loaded plugin id (R/plugins.R); a catalog row
+# whose file_type names a plugin is added as that plugin's track
+cat_file_types <- function()
+  c(CAT_FILE_TYPES, if (exists("plugin_ids")) plugin_ids() else character(0))
 # columns shown in the list by default when the catalog has no "#show" row
 # (matched against lower-cased column names; only columns that exist appear)
 CAT_DEFAULT_SHOW <- c("id", "name", "file_type", "experiment_type",
@@ -41,14 +45,15 @@ CAT_FILTER_MAX_UNIQUE <- 20
 catalog_fetch <- function(src) {
   src <- trimws(src)
   tf  <- tempfile(fileext = ".xlsx")
-  if (grepl("^https?://", src)) {
-    ok <- FALSE
+  if (is_remote_path(src)) {
+    # remote_download() (R/s3.R): a catalog kept as a private S3 object is
+    # read with the user's AWS credentials, a plain URL exactly as before.
     if (requireNamespace("curl", quietly = TRUE)) {
-      ok <- tryCatch({ curl::curl_download(src, tf, quiet = TRUE); TRUE },
-                     error = function(e) FALSE)
-    }
-    if (!ok)
+      remote_download(src, tf)
+    } else {
+      if (is_s3_uri(src)) stop("reading an s3:// catalog needs the 'curl' package")
       utils::download.file(src, tf, mode = "wb", quiet = TRUE)
+    }
   } else {
     if (!file.exists(src)) stop(sprintf(tr("cat_v_no_file"), src))
     if (!file.copy(src, tf, overwrite = TRUE))
@@ -98,6 +103,11 @@ cat_guess_type <- function(path) {
   if (grepl("\\.cluster\\.[^.]*\\.txt$", b))                     return("arc")
   if (grepl("(^|[._])merged_loops\\.txt$", b))                 return("arc")
   if (grepl("\\.(loops?|interactions?)\\.txt$", b))              return("arc")
+  # a plugin may claim an extension of its own (hicarta_plugin(extensions=))
+  if (exists("plugin_guess")) {
+    g <- plugin_guess(path)
+    if (!is.na(g)) return(g)
+  }
   NA_character_
 }
 
@@ -220,9 +230,13 @@ read_catalog <- function(src) {
   }, logical(1))
   keep_i <- which(!is_dir & !empty_row)
 
-  # unknown set_ columns get one warning each (not per row)
+  # unknown set_ columns get one warning each (not per row). A parameter a
+  # loaded plugin declares (set_<param>, R/plugins.R) is a known column too.
   known_set <- c("set_norm", "set_vmax", "set_resolution",
                  "set_color", "set_height")
+  if (exists("plugin_ids"))
+    for (pid in plugin_ids())
+      known_set <- c(known_set, paste0("set_", names(plugin_get(pid)$defaults)))
   for (j in which(startsWith(canon, "set_") & !(canon %in% known_set)))
     warnings <- add_issue(warnings, 1L, "", "", columns[j],
                           tr("cat_v_set_unknown"))
@@ -297,7 +311,7 @@ read_catalog <- function(src) {
     # file type: column value, else guessed from the first path entry
     ft <- if (!is.na(ft_col)) df[[ft_col]][i] else NA_character_
     ft <- if (is.na(ft) || !nzchar(ft)) NA_character_ else tolower(ft)
-    if (!is.na(ft) && !(ft %in% CAT_FILE_TYPES)) {
+    if (!is.na(ft) && !(ft %in% cat_file_types())) {
       warnings <- add_issue(warnings, xr, idc, nm, columns[ft_col],
                             sprintf(tr("cat_v_ftype_bad"), ft))
       ft <- NA_character_

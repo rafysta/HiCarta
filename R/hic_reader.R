@@ -119,7 +119,7 @@
 # ---------------------------------------------------------------------------
 # byte source: one reused curl handle (remote) or one open connection (local)
 # ---------------------------------------------------------------------------
-.hic_is_url <- function(p) grepl("^https?://", p)
+.hic_is_url <- function(p) grepl("^(https?|s3)://", p, ignore.case = TRUE)   # s3:// see R/s3.R
 
 .hic_range <- function(rd, pos, n) {
   n <- as.numeric(n)
@@ -134,12 +134,10 @@
 
   # Reusing rd$handle across calls is the whole point: libcurl keeps the
   # connection alive, so only the first request pays for TCP + TLS.
-  curl::handle_setheaders(rd$handle,
-    Range = sprintf("bytes=%.0f-%.0f", pos, pos + n - 1))
-  r <- curl::curl_fetch_memory(rd$path, handle = rd$handle)
-  if (!(r$status_code %in% c(200L, 206L)))
-    stop(sprintf("HTTP %d while reading %s", r$status_code, rd$path),
-         call. = FALSE)
+  # remote_fetch() (R/s3.R) adds the AWS signature for private S3 objects.
+  r <- remote_fetch(rd$target, rd$handle,
+                    range = sprintf("bytes=%.0f-%.0f", pos, pos + n - 1))
+  if (!(r$status_code %in% c(200L, 206L))) remote_stop(rd$target, r)
   if (is.null(rd$size)) {
     h  <- curl::parse_headers_list(r$headers)
     cr <- h[["content-range"]]
@@ -657,6 +655,7 @@ hic_open <- function(path, max_blocks = 256L) {
   if (rd$remote) {
     if (!requireNamespace("curl", quietly = TRUE))
       stop("reading .hic over http(s) needs the 'curl' package", call. = FALSE)
+    rd$target <- remote_target(path)
     rd$handle <- curl::new_handle()
     curl::handle_setopt(rd$handle,
                         useragent      = "HiCarta",

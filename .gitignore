@@ -36,3 +36,6 @@ desktop.ini
 
 # obsidian
 .obsidian/
+
+# S3 migration records (list every object key in the bucket; keep local)
+scripts/aws/migrate_*.tsv

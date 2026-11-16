@@ -1,0 +1,16 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadLabP01AndPublicObjects",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject"],
+      "Resource": "arn:aws:s3:::uo-cgf/*",
+      "Condition": {
+        "StringEquals": {
+          "s3:ExistingObjectTag/access": ["noma", "p01", "public"]
+        }
+      }
+    }
+  ]
+}

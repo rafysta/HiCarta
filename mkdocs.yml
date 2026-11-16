@@ -41,6 +41,7 @@ nav:
   - Screens & controls: en/interface.md
   - Data catalog: en/data-catalog.md
   - Data formats: en/data-formats.md
+  - Plugins: en/plugins.md
   - Setup & troubleshooting: en/setup-details.md
 
 markdown_extensions:
@@ -82,4 +83,5 @@ plugins:
             Screens & controls: 画面と操作の説明
             Data catalog: データカタログ
             Data formats: データ形式
+            Plugins: プラグイン
             Setup & troubleshooting: セットアップ詳細・トラブルシューティング

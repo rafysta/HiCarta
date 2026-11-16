@@ -34,6 +34,7 @@ R/install_libraries.R  必要パッケージのインストール
 config.txt             起動時の既定値
 run_windows.bat / run_mac.command  ランチャー
 scripts/               変換スクリプト（カタログ⇔旧形式、hic200→.hic など）
+plugins/               プラグインの例（virtual 4C、chr/start/end/value の表）。R で独自トラックを追加できる → docs/plugins.md
 docs/                  ドキュメント原稿（GitHub Pages / MkDocs で公開）
 mkdocs.yml             ドキュメントサイト設定
 .github/workflows/     サイトの自動ビルド・公開
