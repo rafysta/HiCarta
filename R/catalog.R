@@ -88,7 +88,9 @@ cat_path_shape_ok <- function(p) {
 # guess the file type from a path (used when the file_type column is absent
 # or empty). Returns NA_character_ when the extension is not recognised.
 cat_guess_type <- function(path) {
-  b <- tolower(basename(path))
+  # a share link (Dropbox "...x.hic?rlkey=..&dl=1") hides the extension
+  # behind a query string: drop the query of a URL before looking at it
+  b <- tolower(basename(sub("^((https?|s3)://[^?]*)\\?.*$", "\\1", path, ignore.case = TRUE)))
   b <- sub("\\.gz$", "", b)
   if (grepl("\\.hic$", b))                                    return("hic")
   if (grepl("\\.(bw|bigwig|bedgraph|bdg)$", b))               return("bigwig")

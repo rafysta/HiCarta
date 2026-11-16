@@ -103,9 +103,14 @@ hic_cache_dir <- function() {
 }
 
 # Generic: download a remote file once to the cache, preserving its extension.
-cache_local <- function(path, ext = tools::file_ext(path)) {
+cache_local <- function(path, ext = NULL) {
   if (is.null(path) || !is_remote_path(path)) return(path)
-  key  <- paste0(tools::file_path_sans_ext(basename(path)), "_",
+  # Name the cached copy from the URL WITHOUT its query string: a share link
+  # ("...x.bed?rlkey=..&dl=1") would otherwise lose its extension and put "?"
+  # in the file name, which Windows refuses.
+  clean <- sub("\\?.*$", "", path)
+  if (is.null(ext)) ext <- tools::file_ext(clean)
+  key  <- paste0(tools::file_path_sans_ext(basename(clean)), "_",
                  abs(sum(utf8ToInt(path))) %% 100000L,
                  if (nzchar(ext)) paste0(".", ext) else "")
   dest <- file.path(hic_cache_dir(), key)

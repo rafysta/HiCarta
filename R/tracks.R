@@ -56,7 +56,7 @@ parse_igv_xml <- function(src) {
 # ---------------------------------------------------------------------------
 .bw_native_ok <- function(path) {
   exists("bw_reader") && identical(hic_engine(), "native") &&
-    tolower(tools::file_ext(path)) %in% c("bw", "bigwig")
+    tolower(tools::file_ext(sub("^((https?|s3)://[^?]*)\\?.*$", "\\1", path, ignore.case = TRUE))) %in% c("bw", "bigwig")
 }
 
 # Path to hand rtracklayer: it needs a local file, so a URL must be cached.
