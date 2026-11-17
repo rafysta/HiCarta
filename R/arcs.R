@@ -107,7 +107,7 @@ ARC_COORD_ALIASES <- list(
   c2 = c("chr2","chrom2","chromosome2")
 )
 # strength columns, best first
-ARC_SCORE_ALIASES <- c("score","pet","petcount","pet_count","o","observed","count",
+ARC_SCORE_ALIASES <- c("score","pet","petcount","pet_count","o","observed","count","cc",
                        "counts","value","fdr_bl","q-value","qvalue","q_value",
                        "p-value","pvalue","p_value")
 
