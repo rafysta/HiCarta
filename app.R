@@ -748,6 +748,13 @@ function(el, x) {
     report(); drawRulers();
     Shiny.setInputValue('auto_map_height', h, {priority: 'event'});
   });
+  // track-only mode: report the height left for the tracks, from the top of
+  // the track area to the bottom of the window
+  Shiny.addCustomMessageHandler('measureTracks', function(msg){
+    var w = document.getElementById('mapwrap');
+    var top = w ? w.getBoundingClientRect().top : 0;
+    Shiny.setInputValue('trk_avail_h', {h: Math.max(100, window.innerHeight - top - 12), t: Date.now()}, {priority: 'event'});
+  });
   Shiny.addCustomMessageHandler('autoAdjust', function(msg){
     var c = map.getContainer();
     var h = availH(msg.ntracks * (msg.perTrack + 6));    // tracks stacked below
@@ -971,6 +978,12 @@ ui <- function(request) {
     "#topnav_items{display:flex; align-items:center; gap:12px}",
     "body.ui-collapsed #topnav_items{display:none}",
     "body.ui-collapsed #side_col{display:none}",
+    # The side panel scrolls on its own and stays in view: a long tab (Display >
+    # Map) used to need the PAGE to be scrolled, which pushed the map off the
+    # screen. Only on the two-column layout; a narrow window stacks as before.
+    "@media (min-width:768px){",
+    "  #side_col > .well{position:sticky; top:8px; max-height:calc(100vh - 16px);",
+    "    overflow-y:auto; overscroll-behavior:contain}}",
     "body.ui-collapsed #main_col{width:100%; max-width:100%; flex:0 0 100%}"))),
   # Toggling is pure client-side (no Shiny round-trip) so the map and tracks are
   # never rebuilt — a synthetic window resize is enough: Leaflet re-measures via
@@ -1265,7 +1278,12 @@ ui <- function(request) {
                 column(6, numericInput("map_height", tr("set_map_height"), 720, min = 200, step = 20)),
                 column(6, div(style = "margin-top:25px;",
                               actionButton("fit_map", tr("set_fit"), class = "btn-sm")))),
-              actionButton("apply_map", tr("set_apply"), class = "btn-sm btn-primary"))),
+              actionButton("apply_map", tr("set_apply"), class = "btn-sm btn-primary"),
+              hr(),
+              # hide the square map and keep the tracks (e.g. only a 45-degree
+              # rotated map); opening a .hic again brings the map back
+              actionButton("map_close", tr("disp_map_close"), class = "btn-sm"),
+              helpText(tr("disp_map_close_hint")))),
           # -- two-sample comparison: kept in its own tab so the Map tab stays
           #    short enough that the side panel never outgrows the window --
           tabPanel(tr("disp_tab_cmp"),
@@ -3815,12 +3833,32 @@ server <- function(input, output, session) {
 
   # Auto adjust: each track ~70px, contact map fills the rest of the window
   observeEvent(input$auto_adjust, {
+    # track-only mode (map hidden or never opened): there is no map to shrink,
+    # so the TRACKS share the window instead - the browser reports how much
+    # height is left below the ruler (trk_avail_h, handled below)
+    if (!isTRUE(rv$has_hic)) {
+      if (length(rv$tracks) > 0) session$sendCustomMessage("measureTracks", list())
+      return()
+    }
     if (length(rv$tracks) > 0) {
       tl <- rv$tracks
       for (k in names(tl)) tl[[k]]$height <- 70
       rv$tracks <- tl
     }
     session$sendCustomMessage("autoAdjust", list(ntracks = length(rv$tracks), perTrack = 70))
+  })
+  observeEvent(input$trk_avail_h, {
+    if (isTRUE(rv$has_hic) || length(rv$tracks) == 0) return()
+    avail <- suppressWarnings(as.numeric(input$trk_avail_h$h))
+    if (length(avail) != 1 || !is.finite(avail)) return()
+    tl  <- rv$tracks
+    cur <- vapply(tl, function(t) as.numeric(t$height), numeric(1))
+    cur[!is.finite(cur) | cur <= 0] <- 90
+    room <- avail - 36 - 6 * length(tl)          # ruler + gaps between plots
+    if (room < 40 * length(tl)) room <- 40 * length(tl)
+    nh <- pmax(40, floor(cur / sum(cur) * room))  # keep the tracks' proportions
+    for (i in seq_along(tl)) tl[[i]]$height <- nh[i]
+    rv$tracks <- tl
   })
   observeEvent(input$auto_map_height, {
     if (!is.null(input$auto_map_height))
@@ -4769,6 +4807,30 @@ server <- function(input, output, session) {
     invisible(TRUE)
   }
 
+  # ---- hide the contact map: switch to track-only mode -----------------------
+  # The square map stays out of the way while the tracks (typically a 45-degree
+  # rotated map of the same .hic) keep the current place. The chromosome list
+  # comes from the .hic header, exactly as when a rotated-map track is added
+  # first. Re-opening any .hic restores the map (do_open() sets has_hic again).
+  observeEvent(input$map_close, {
+    if (!isTRUE(rv$has_hic) || is.null(st$path)) return()
+    path <- st$path
+    ci <- tryCatch(track_chrom_info(path, "RotMap"), error = function(e) NULL)
+    if (is.null(ci) || !length(ci)) { rv$msg <- tr("msg_no_chrom"); return() }
+    vw  <- view_range()
+    chr <- if (is.null(rv$genome)) match_chrom(rv$chr, names(ci)) else NA_character_
+    if (is.na(chr)) { chr <- names(ci)[1]; vw <- NULL }
+    session$sendCustomMessage("showMap", list(show = FALSE))
+    rv$has_hic <- FALSE; rv$genome <- NULL
+    rv$has_b <- FALSE; st$path2 <- NULL
+    st$path <- NULL                      # as before any map was opened
+    rv$chrinfo <- ci
+    updateSelectInput(session, "chr", choices = names(ci), selected = chr)
+    if (is.null(vw)) set_track_view(chr, 1, as.numeric(ci[[chr]]))
+    else set_track_view(chr, vw$west, vw$east)
+    rv$msg <- tr("msg_map_closed")
+  })
+
   observeEvent(input$trk_clear, {
     rv$tracks <- list(); rv$trk_msg <- tr("msg_cleared_trk")
     # in track-only mode the coordinates came from a track, so drop them too:
@@ -5099,6 +5161,16 @@ server <- function(input, output, session) {
     if (!is.finite(s) || !is.finite(e) || e <= s) return(NULL)
     yy <- exp_y_region()
     er <- exp_resolution()
+    # Same guard as render_tile(): a pinned fine resolution over a wide region
+    # (5 kb over a whole chromosome) would read billions of cells and freeze
+    # the app. 5,000 bins across is far more than any printed figure resolves.
+    if (!is.null(er) && length(er) == 1 && is.finite(er) && length(rv$res_all)) {
+      span <- max(e - s, as.numeric(yy$end) - as.numeric(yy$start), na.rm = TRUE)
+      if (is.finite(span) && span / er > 5000) {
+        fits <- rv$res_all[span / rv$res_all <= 5000]
+        er <- if (length(fits)) min(fits) else max(rv$res_all)
+      }
+    }
     gn <- rv$genome
     # the comparison sample and its depth factor change the matrix too, so they
     # belong in the cache key
@@ -5316,7 +5388,11 @@ server <- function(input, output, session) {
                  height = paste0(max(200, round(h * sc)), "px")))
   })
 
-  output$exp_preview <- renderPlot({
+  # execOnResize: the preview box changes size with the paper (A4 portrait ->
+  # landscape). Shiny would otherwise REPLAY the recorded plot at the new size,
+  # and a layout with absolute row heights cannot be replayed onto a shorter
+  # page: "invalid graphics state" (2026-11-17). Drawing it again is cheap.
+  output$exp_preview <- renderPlot(execOnResize = TRUE, {
     d <- export_mat()
     if (is.null(d)) req(is.null(st$path))      # no map: tracks-only preview
     b <- if (is.null(d)) list(vmin = 0, vmax = 1) else exp_bounds(d$res, d$diff)

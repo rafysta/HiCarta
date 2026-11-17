@@ -310,11 +310,40 @@ draw_export_map <- function(m, chr, start, end,
     RIGHT <- 1
     axis_h    <- if (isTRUE(ticks)) 60 else 1     # thin row holding the x-axis
     track_mar <- c(0.3, LEFT, 0.3, RIGHT)
-    hts <- c(axis_h, vapply(tracks, function(t) as.numeric(t$height), numeric(1)))
+    rel <- c(axis_h, vapply(tracks, function(t) as.numeric(t$height), numeric(1)))
+    rel[!is.finite(rel) | rel <= 0] <- 1
+    # Rows are sized in INCHES, not just in proportion. On a short page (A4
+    # landscape, 2026-11-17) six tracks share ~6 inches, and a proportional
+    # share left some rows thinner than their own margins: plot.new() failed
+    # with "figure margins too large" and the next call reported "invalid
+    # graphics state". Every row now gets at least its margins plus a sliver of
+    # plot; when even that does not fit, the margin line height (mex) shrinks.
+    avail <- graphics::par("din")[2] - cap_in
+    fit_rows <- function(mex) {
+      u <- graphics::par("csi") * mex
+      need <- c(if (isTRUE(ticks)) (0.2 + 3.6) * u + 0.10 else 0.5 * u + 0.05,
+                rep(0.6 * u + 0.10, ntr))
+      list(need = need, ok = sum(need) <= avail)
+    }
+    mex <- 1
+    fr <- fit_rows(mex)
+    if (!fr$ok && is.finite(avail) && avail > 0) {
+      mex <- max(0.35, avail / sum(fr$need)); fr <- fit_rows(mex)
+    }
+    need <- fr$need
+    h <- pmax(need, rel / sum(rel) * avail)
+    over <- sum(h) - avail
+    if (is.finite(over) && over > 0) {
+      slack <- h - need
+      h <- if (sum(slack) > 0) h - slack / sum(slack) * min(over, sum(slack)) else h
+    }
+    if (!all(is.finite(h)) || any(h <= 0)) h <- rel / sum(rel) * max(avail, 1)
+    hts <- graphics::lcm(h * 2.54)
     if (ncap > 0) hts <- c(hts, graphics::lcm(cap_in * 2.54))
     nrow_l <- ntr + 1L + (ncap > 0)
     graphics::layout(matrix(seq_len(nrow_l), ncol = 1), heights = hts)
-    op <- graphics::par(mar = c(0.2, LEFT, 3.6, RIGHT)); on.exit(graphics::par(op))
+    op <- graphics::par(mar = c(0.2, LEFT, if (isTRUE(ticks)) 3.6 else 0.2, RIGHT), mex = mex)
+    on.exit(graphics::par(op))
     graphics::plot.new()
     graphics::plot.window(xlim = c(start, end), ylim = c(0, 1), xaxs = "i", yaxs = "i")
     if (isTRUE(ticks)) {
@@ -325,7 +354,8 @@ draw_export_map <- function(m, chr, start, end,
     for (t in tracks) {
       dfn <- t$draw
       if (is.function(dfn)) tryCatch(dfn(track_mar), error = function(e) {
-        graphics::par(mar = track_mar); graphics::plot.new()
+        # keep the layout moving to the next row even if this one cannot draw
+        try({ graphics::par(mar = c(0, 0, 0, 0)); graphics::plot.new() }, silent = TRUE)
       })
     }
     .draw_caption()

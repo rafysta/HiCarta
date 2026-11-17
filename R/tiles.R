@@ -337,12 +337,13 @@ render_tile <- function(st, z, x, y, src = "a") {
     st$res[which.min(abs(st$res - st$fixedRes))]
   }
 
-  # A genome-wide tile reads every chromosome pair it touches, so a resolution
-  # pinned far finer than the tile can show would ask for the whole genome at
-  # that bin size - gigabytes, for a 256-px picture. Allow 4x oversampling and
-  # no more: past that the extra bins cannot be seen anyway. A single-
-  # chromosome map reads one block and needs no such guard.
-  if (!is.null(st$genome)) {
+  # A resolution pinned far finer than the tile can show asks for an enormous
+  # block: a whole-chromosome tile at 5 kb is ~50,000 x 50,000 bins on chr1,
+  # which froze the app for minutes with no message (2026-11-17), and a
+  # genome-wide tile would be worse. Allow 4x oversampling and no more - past
+  # that the extra bins cannot be seen anyway. The pinned resolution is used
+  # again as soon as the view is zoomed in far enough for it.
+  {
     maxBins <- TILE_PX * 4
     # measure the part of the tile that is actually inside the genome - an edge
     # tile hangs over the end and would otherwise look far more expensive than
