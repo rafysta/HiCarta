@@ -412,7 +412,10 @@ plot_rot_track <- function(band, chr, vstart, vend, chrlen = Inf,
   if (!is.null(band$res)) lbl <- sprintf("%s  (%s)", lbl, fmt_res(band$res))
   .rot_text(vstart + 0.006 * span_x, ytop + ydir * span_y * 0.04, lbl,
             adj = c(0, 0.5), cex = 1.1)
-  if (!is.null(scale_lab) && identical(yscale, "inline"))
+  # the colour ceiling is printed in both modes: a figure exported with the
+  # distance axis ("axis") used to lose it, so nobody could tell what the
+  # darkest colour meant on paper (2026-11-17)
+  if (!is.null(scale_lab))
     .rot_text(vstart + 0.006 * span_x, ytop + ydir * span_y * 0.14,
               paste0("max ", scale_lab), adj = c(0, 0.5), cex = 0.82)
   if (!is.null(msg))

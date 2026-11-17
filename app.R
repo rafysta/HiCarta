@@ -5339,6 +5339,11 @@ server <- function(input, output, session) {
     # (first pass through the modal), which is not the same as switched off
     if (isFALSE(input$exp_caption)) return(NULL)
     gx <- exp_x_region(); yy <- exp_y_region()
+    # tracks only (map closed / no .hic): every track carries its own label, so
+    # the caption is just the region - no sample, no Y axis, no bin size
+    if (is.null(d) && is.null(st$path))
+      return(sprintf(tr("print_cap_region_x"),
+                     gx$chr, fmt_bp(gx$start), fmt_bp(gx$end)))
     reg <- sprintf(tr("print_cap_region"),
                    gx$chr, fmt_bp(gx$start), fmt_bp(gx$end),
                    yy$chr, fmt_bp(yy$start), fmt_bp(yy$end),
