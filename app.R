@@ -1149,7 +1149,9 @@ ui <- function(request) {
                                                tr("session_browse"),
                                                multiple = FALSE, class = "btn-sm"),
                 actionButton("session_load_btn", tr("btn_load"),
-                             class = "btn-sm btn-primary")))))))),
+                             class = "btn-sm btn-primary")),
+              # session messages belong here, not under the Data browser tab
+              verbatimTextOutput("session_status"))))))),
 
   # Same markup sidebarLayout() would emit, but with ids on both columns so the
   # collapse toggle (see #ui_collapse_btn above) can hide the side column and
@@ -2114,6 +2116,7 @@ server <- function(input, output, session) {
   })
 
   output$dl_status <- renderText(rv$dl_msg)
+  output$session_status <- renderText(rv$sess_msg)
 
 
   # value-scale controls (global vmin/vmax), seeded from an overview read
@@ -3253,17 +3256,25 @@ server <- function(input, output, session) {
   observeEvent(input$session_load_btn, {
     # fromJSON takes a local path or an http(s) URL, so the box accepts both
     sp <- trimws(input$session_path %||% "")
-    if (!nzchar(sp)) { rv$msg <- tr("msg_session_no_file"); return() }
+    if (!nzchar(sp)) { rv$sess_msg <- tr("msg_session_no_file"); return() }
+    rd_err <- NULL
     sess <- tryCatch(jsonlite::fromJSON(sp, simplifyVector = FALSE),
-                     error = function(e) NULL)
+                     error = function(e) { rd_err <<- conditionMessage(e); NULL })
+    if (!is.null(rd_err)) { rv$sess_msg <- sprintf(tr("msg_session_read"), rd_err); return() }
     if (is.null(sess) || !identical(sess$app, "HiCarta")) {
-      rv$trk_msg <- tr("msg_session_bad"); rv$msg <- tr("msg_session_bad"); return()
+      rv$sess_msg <- tr("msg_session_bad"); return()
     }
+    rv$sess_msg <- ""
     hic <- sess$hic %||% list(); reg <- sess$region %||% list(); d <- sess$display %||% list()
     # src may be one path or (virtual dataset) a list of paths
     hic_src <- unlist(hic$src, use.names = FALSE)
     hic_src <- hic_src[!is.na(hic_src) & nzchar(hic_src)]
-    if (length(hic_src) == 0) { rv$msg <- tr("msg_session_bad"); return() }
+    # No .hic: a session saved with the map closed (Display > Map > Close map)
+    # has hic$src = null and lives on its tracks alone (2026-11-17). Only a file
+    # with neither is unusable.
+    if (length(hic_src) == 0 && length(sess$tracks %||% list()) == 0) {
+      rv$sess_msg <- tr("msg_session_empty"); return()
+    }
 
     # rebuild tracks
     tl <- list(); n <- 0L
@@ -3322,6 +3333,29 @@ server <- function(input, output, session) {
     }
     rv$bm_seq <- bn; rv$bookmarks <- bl
 
+    # ---- tracks only: the coordinate system comes from the first track that
+    # can name its chromosomes, exactly as when the map is closed by hand
+    if (length(hic_src) == 0) {
+      if (!is.null(d$trk_bins)) rv$trk_bins <- d$trk_bins
+      ci <- NULL
+      for (t in tl) {
+        ci <- tryCatch(track_chrom_info(t$path, t$type), error = function(e) NULL)
+        if (length(ci)) break
+      }
+      if (!length(ci)) { rv$sess_msg <- tr("msg_no_chrom"); return() }
+      session$sendCustomMessage("showMap", list(show = FALSE))
+      rv$has_hic <- FALSE; rv$genome <- NULL
+      rv$has_b <- FALSE; rv$src_b <- NULL; st$path2 <- NULL
+      st$path <- NULL
+      rv$chrinfo <- ci
+      chr <- match_chrom(hic$chr %||% names(ci)[1], names(ci))
+      if (is.na(chr)) chr <- names(ci)[1]
+      updateSelectInput(session, "chr", choices = names(ci), selected = chr)
+      set_track_view(chr, reg$start %||% 1, reg$end %||% as.numeric(ci[[chr]]))
+      rv$sess_msg <- tr("msg_session_loaded_trk"); rv$trk_msg <- rv$sess_msg
+      return()
+    }
+
     # remember the source so goto / session save keep working after restore
     rv$cat_src <- hic_src
     if (!is.null(hic$chr))
@@ -3364,7 +3398,7 @@ server <- function(input, output, session) {
     }
     if (!is.null(d$map_height))
       session$sendCustomMessage("setMapHeight", list(h = d$map_height))
-    rv$trk_msg <- tr("msg_session_loaded")
+    rv$trk_msg <- tr("msg_session_loaded"); rv$sess_msg <- rv$trk_msg
   })
 
   # Display > Tracks: one compact chip per track, in DRAW ORDER. Dragging a
