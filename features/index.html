@@ -1,0 +1,1390 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Interactive Hi-C contact map viewer (R + Shiny + Leaflet)">
+      
+      
+        <meta name="author" content="Hideki Tanizawa">
+      
+      
+        <link rel="canonical" href="https://rafysta.github.io/HiCarta/features/">
+      
+      
+        <link rel="prev" href="../first-5-minutes/">
+      
+      
+        <link rel="next" href="../tutorial-compare/">
+      
+      
+        
+          <link rel="alternate" href="./" hreflang="en">
+        
+          <link rel="alternate" href="../ja/features/" hreflang="ja">
+        
+      
+      
+      <link rel="icon" href="../images/logo/favicon-32.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
+    
+    
+      
+        <title>What HiCarta can do - HiCarta</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#what-hicarta-can-do" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="HiCarta" class="md-header__button md-logo" aria-label="HiCarta" data-md-component="logo">
+      
+  <img src="../images/logo/hicarta-logo-mark.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            HiCarta
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              What HiCarta can do
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+      <div class="md-header__option">
+  <div class="md-select">
+    
+    <button class="md-header__button md-icon" aria-label="Select language">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m12.87 15.07-2.54-2.51.03-.03A17.5 17.5 0 0 0 14.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2zm-2.62 7 1.62-4.33L19.12 17z"/></svg>
+    </button>
+    <div class="md-select__inner">
+      <ul class="md-select__list">
+        
+          <li class="md-select__item">
+            <a href="./" hreflang="en" class="md-select__link">
+              English
+            </a>
+          </li>
+        
+          <li class="md-select__item">
+            <a href="../ja/features/" hreflang="ja" class="md-select__link">
+              日本語
+            </a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+</div>
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/rafysta/HiCarta" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    rafysta/HiCarta
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="HiCarta" class="md-nav__button md-logo" aria-label="HiCarta" data-md-component="logo">
+      
+  <img src="../images/logo/hicarta-logo-mark.png" alt="logo">
+
+    </a>
+    HiCarta
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/rafysta/HiCarta" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    rafysta/HiCarta
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../first-5-minutes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First 5 minutes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What HiCarta can do
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What HiCarta can do
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#navigate-hi-c-maps-intuitively" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Navigate Hi-C maps intuitively
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Navigate Hi-C maps intuitively">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#explore-whole-genome-and-inter-chromosomal-contacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Explore whole-genome and inter-chromosomal contacts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compare-hi-c-maps-from-different-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compare Hi-C maps from different conditions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#view-hi-c-maps-alongside-other-genomic-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        View Hi-C maps alongside other genomic data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manage-your-samples-with-a-single-excel-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manage your samples with a single Excel file
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#share-unpublished-data-securely" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Share unpublished data securely
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#create-custom-tracks-in-r-plugins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create custom tracks in R (plugins)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#export-editable-publication-ready-figures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export editable, publication-ready figures
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#work-with-your-existing-data-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Work with your existing data files
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#other-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Other features
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorial-compare/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compare two conditions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorial-figure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Make a publication figure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../interface/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Screens & controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How HiCarta works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup-details/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup & troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../comparison/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Comparison with other tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Demo data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#navigate-hi-c-maps-intuitively" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Navigate Hi-C maps intuitively
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Navigate Hi-C maps intuitively">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#explore-whole-genome-and-inter-chromosomal-contacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Explore whole-genome and inter-chromosomal contacts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compare-hi-c-maps-from-different-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compare Hi-C maps from different conditions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#view-hi-c-maps-alongside-other-genomic-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        View Hi-C maps alongside other genomic data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manage-your-samples-with-a-single-excel-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manage your samples with a single Excel file
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#share-unpublished-data-securely" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Share unpublished data securely
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#create-custom-tracks-in-r-plugins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create custom tracks in R (plugins)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#export-editable-publication-ready-figures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export editable, publication-ready figures
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#work-with-your-existing-data-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Work with your existing data files
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#other-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Other features
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="what-hicarta-can-do">What HiCarta can do<a class="headerlink" href="#what-hicarta-can-do" title="Permanent link">&para;</a></h1>
+<p>Explore HiCarta’s features through screenshots and short videos. Each feature links to the relevant sections of <strong><a href="../usage/">Usage</a></strong> and <strong><a href="../interface/">Screens &amp; controls</a></strong> for detailed instructions. All examples on this page use publicly available <strong><a href="../demo-data/">demo data</a></strong> visualized in HiCarta.</p>
+<hr />
+<h2 id="navigate-hi-c-maps-intuitively">Navigate Hi-C maps intuitively<a class="headerlink" href="#navigate-hi-c-maps-intuitively" title="Permanent link">&para;</a></h2>
+<p><img alt="" src="../images/gallery/gal_1_map.jpg" /></p>
+<p>Drag to pan and scroll to zoom in and out. The resolution adjusts automatically to the zoom level, allowing seamless navigation from an entire chromosome down to a few kilobases. HiCarta retrieves only the data needed to render the current view, helping maintain responsive navigation even with high-resolution maps and large genomes.</p>
+<ul>
+<li><strong>Go anywhere</strong> — enter a chromosome and a range to move to the region you want. → <a href="../usage/#goto">Move to any location</a></li>
+<li><strong>Move with buttons</strong> — pan the map in fixed increments using the eight directional buttons. → <a href="../usage/#pan">Move with buttons</a></li>
+<li><strong>Bookmarks</strong> — save a named region of interest and return to it with one click. A bookmark records only the genomic position, so after switching samples the same bookmark shows the same region in the new sample. Bookmarks can also be exchanged as Excel files. → <a href="../usage/#bookmark">Bookmark a region of interest</a></li>
+</ul>
+<h3 id="explore-whole-genome-and-inter-chromosomal-contacts">Explore whole-genome and inter-chromosomal contacts<a class="headerlink" href="#explore-whole-genome-and-inter-chromosomal-contacts" title="Permanent link">&para;</a></h3>
+<p><img alt="" src="../images/gallery/gal_6_wholegenome.jpg" width="500" /></p>
+<p>Display all chromosomes along both axes to visualize every chromosome pair at once, then zoom into any block. You can also choose a different chromosome for the vertical axis to show only the contacts between two chromosomes (trans). → <a href="../interface/#navigate">Navigate</a></p>
+<hr />
+<h2 id="compare-hi-c-maps-from-different-conditions">Compare Hi-C maps from different conditions<a class="headerlink" href="#compare-hi-c-maps-from-different-conditions" title="Permanent link">&para;</a></h2>
+<p><img alt="" src="../images/clips/clip_compare.gif" /></p>
+<p>Open a second sample to compare Hi-C maps from different conditions on one screen. There are three ways to compare:</p>
+<table>
+<thead>
+<tr>
+<th>View</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Split</strong></td>
+<td>Shows sample A above and sample B below the diagonal (upper right and lower left).</td>
+</tr>
+<tr>
+<td><strong>Curtain</strong></td>
+<td>Drag the divider to switch between the samples on its two sides. The spacebar switches the whole map between A and B instantly.</td>
+</tr>
+<tr>
+<td><strong>Difference</strong></td>
+<td>Shows the log2 ratio or the difference of the two maps on a symmetric scale centered on 0. Palettes designed for users with color vision deficiencies are available.</td>
+</tr>
+</tbody>
+</table>
+<p>When automatic sequencing-depth correction is enabled, HiCarta scales sample B using the ratio of total contact counts (A / B). → <strong><a href="../tutorial-compare/">Tutorial: compare two conditions</a></strong></p>
+<hr />
+<h2 id="view-hi-c-maps-alongside-other-genomic-data">View Hi-C maps alongside other genomic data<a class="headerlink" href="#view-hi-c-maps-alongside-other-genomic-data" title="Permanent link">&para;</a></h2>
+<p><img alt="" src="../images/clips/clip_loops_tracks.gif" /></p>
+<p>The following tracks can be shown below the Hi-C map. Tracks remain synchronized with the Hi-C map as you navigate, keeping the displayed data aligned to the same genomic region.</p>
+<table>
+<thead>
+<tr>
+<th>Track</th>
+<th>What it shows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Rotated map (RotMap)</strong></td>
+<td>The Hi-C map as a triangular track rotated by 45 degrees. Configure the distance range, orientation, colors, normalization, and observed/expected (O/E) display.</td>
+</tr>
+<tr>
+<td><strong>Loops (arcs)</strong></td>
+<td>BEDPE files, HiCCUPS loop lists and ChIA-PET / HiChIP tables, drawn as arcs. Color and line width can reflect interaction strength.</td>
+</tr>
+<tr>
+<td><strong>Signal</strong></td>
+<td>bigWig (e.g., ChIP-seq signals). The drawing resolution can be set for each track.</td>
+</tr>
+<tr>
+<td><strong>Genomic intervals and genes</strong></td>
+<td>BED, GFF3</td>
+</tr>
+<tr>
+<td><strong>Domain boundary strength</strong></td>
+<td>Border Strength (<code>*_BS.txt</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><img alt="" src="../images/gallery/gal_4_tracks_genes.jpg" /></p>
+<ul>
+<li><strong>Tracks only</strong> — hide the square contact map and display only the rotated map and other tracks. You can also show tracks without opening a Hi-C map at all. → <a href="../usage/#tracks-only">Tracks without a contact map</a></li>
+<li><strong>Appearance</strong> — set the name, color, height and maximum / minimum of each track. Drag the chips to change the order. → <a href="../interface/#tracks">Tracks</a></li>
+</ul>
+<hr />
+<h2 id="manage-your-samples-with-a-single-excel-file">Manage your samples with a single Excel file<a class="headerlink" href="#manage-your-samples-with-a-single-excel-file" title="Permanent link">&para;</a></h2>
+<p><img alt="" src="../images/illustrations/hicarta-spreadsheet-to-app.png" width="600" /></p>
+<p>No database is required. Create an Excel data catalog with one row per sample. Add metadata columns, such as cell type, experimental condition, or antibody. Columns with 20 or fewer distinct values become filters, helping you find the desired data among hundreds of samples. Share the same Excel file with collaborators to work from a common catalog. → <strong><a href="../data-catalog/">Data catalog</a></strong></p>
+<hr />
+<h2 id="share-unpublished-data-securely">Share unpublished data securely<a class="headerlink" href="#share-unpublished-data-securely" title="Permanent link">&para;</a></h2>
+<p><img alt="" src="../images/illustrations/hicarta-access-permissions.png" width="600" /></p>
+<p>Assign access-control tags to files stored in Amazon S3 and configure permissions based on those tags so that only authorized users can open the files. Once the permissions are configured, you can expand access (e.g., upon publication) by changing the relevant tag. There is no need to move the files or change the paths in your Excel catalog. → <a href="../data-catalog/#private-data-on-amazon-s3">Private data on Amazon S3</a></p>
+<hr />
+<h2 id="create-custom-tracks-in-r-plugins">Create custom tracks in R (plugins)<a class="headerlink" href="#create-custom-tracks-in-r-plugins" title="Permanent link">&para;</a></h2>
+<p><img alt="" src="../images/clips/clip_plugin_v4c.gif" /></p>
+<p>Extend HiCarta’s built-in visualization features by creating custom tracks in R. A typical plugin is a single R script defining <code>read()</code> and <code>draw()</code> functions. Place it in the <code>plugins/</code> folder to make it available as a new track type. HiCarta automatically generates a settings dialog for the plugin. Plugins also work with the catalog, with saving and restoring sessions, and with figure export. Two plugins are included: one draws a table with the columns <code>chr</code>, <code>start</code>, <code>end</code> and <code>value</code>, and one draws a Virtual 4C profile read from a <code>.hic</code> file. → <strong><a href="../plugins/">Plugins</a></strong></p>
+<p><img alt="" src="../images/illustrations/hicarta-plugin-workflow.png" width="600" /></p>
+<hr />
+<h2 id="export-editable-publication-ready-figures">Export editable, publication-ready figures<a class="headerlink" href="#export-editable-publication-ready-figures" title="Permanent link">&para;</a></h2>
+<p><img alt="" src="../images/print_preview.png" /></p>
+<p>Use the print preview to review the figure while adjusting its contents, including coordinate ticks, the legend, tracks, and sample information. In the PDF, the Hi-C map is saved as a raster image and the axes, labels and tracks as editable vector graphics. This helps keep file sizes manageable while allowing further editing in Illustrator, Inkscape, or similar tools. PNG output and printing directly to a printer are also available. → <strong><a href="../tutorial-figure/">Tutorial: make a publication figure</a></strong></p>
+<hr />
+<h2 id="work-with-your-existing-data-files">Work with your existing data files<a class="headerlink" href="#work-with-your-existing-data-files" title="Permanent link">&para;</a></h2>
+<p><img alt="" src="../images/illustrations/hicarta-data-sources.png" width="600" /></p>
+<p>Open <code>.hic</code> files and track data from your own computer, a web server, Dropbox shared links or Amazon S3 (public or private).</p>
+<ul>
+<li><strong>On-demand data retrieval</strong> — by default, HiCarta retrieves only the portions of remote <code>.hic</code> and bigWig files required for the current view with HTTP range requests. There is no need to download the whole file.</li>
+<li><strong>Caching for faster navigation</strong> — previously retrieved data are cached in memory, speeding up revisits to cached regions.</li>
+<li><strong>On a slow connection</strong> — a setting switches to a mode that saves the whole file locally before drawing (<code>hic_engine = download</code>).</li>
+<li>BED, GFF3 and Border Strength files are read in full when loaded.</li>
+</ul>
+<p>→ <strong><a href="../how-it-works/">How HiCarta works</a></strong></p>
+<hr />
+<h2 id="other-features">Other features<a class="headerlink" href="#other-features" title="Permanent link">&para;</a></h2>
+<ul>
+<li>
+<p><strong>Color scale</strong> — choose from four palettes (matlab, gentle, red, blue) and set the maximum with a linear or log10 slider. → <a href="../usage/#contrast">Change the contrast (color intensity)</a></p>
+<p><img alt="" src="../images/color_pallete.png" /></p>
+</li>
+<li>
+<p><strong>Normalization and resolution</strong> — switch the normalization (KR, ICE, Raw and so on) and the resolution of an open map without reopening it. → <a href="../interface/#display">Display</a></p>
+</li>
+<li><strong>Sessions</strong> — save the whole view, including data sources, the genomic region, the color scale, and all tracks, to one file (<code>.json</code>), and restore it later. → <a href="../usage/#session">Save the view and reproduce it later (session)</a></li>
+<li><strong>Open in IGV</strong> — send a sample from the catalog to a running IGV. → <a href="../data-catalog/#open-in-igv">Open in IGV</a></li>
+<li><strong>Interface language</strong> — switch the interface between English and Japanese. → <a href="../usage/#language">Switch the display language</a></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.top", "navigation.sections", "search.suggest", "search.highlight", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>
