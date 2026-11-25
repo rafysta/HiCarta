@@ -144,7 +144,11 @@ HiCarta は、Web 地図アプリと同様にタイルベースの描画方式�
   - [インストール](https://rafysta.github.io/HiCarta/ja/install/) · [使い方](https://rafysta.github.io/HiCarta/ja/usage/) · [機能](https://rafysta.github.io/HiCarta/ja/features/)
   - [データカタログ（Excel）](https://rafysta.github.io/HiCarta/ja/data-catalog/) · [データ形式](https://rafysta.github.io/HiCarta/ja/data-formats/) · [プラグイン](https://rafysta.github.io/HiCarta/ja/plugins/)
   - [セットアップの詳細とトラブルシューティング](https://rafysta.github.io/HiCarta/ja/setup-details/)
-- ▶ 動画: [4 分のデモ](https://youtu.be/C0b3ExIoMVM) · [1 分の紹介](https://youtu.be/emcjmTKh6gQ)
+- ▶ YouTube の動画（サムネイルをクリックすると再生できます）:
+
+| | |
+|:---:|:---:|
+| <a href="https://youtu.be/C0b3ExIoMVM"><img src="docs/images/youtube/HiCarta_youtube_thumb_4min.jpg" width="400" alt="HiCarta の 4 分のデモ（YouTube）"></a><br>**▶ 4 分のデモ** | <a href="https://youtu.be/emcjmTKh6gQ"><img src="docs/images/youtube/HiCarta_youtube_thumb_1min.jpg" width="400" alt="HiCarta の 1 分の紹介（YouTube）"></a><br>**▶ 1 分の紹介** |
 
 ### 設定
 

@@ -144,7 +144,11 @@ Comparison based on the documentation for each tool as of November 2026.
   - [Installation](https://rafysta.github.io/HiCarta/install/) · [Usage](https://rafysta.github.io/HiCarta/usage/) · [Features](https://rafysta.github.io/HiCarta/features/)
   - [Data catalog (Excel)](https://rafysta.github.io/HiCarta/data-catalog/) · [Data formats](https://rafysta.github.io/HiCarta/data-formats/) · [Plugins](https://rafysta.github.io/HiCarta/plugins/)
   - [Setup details and troubleshooting](https://rafysta.github.io/HiCarta/setup-details/)
-- ▶ Videos: [4-min demo](https://youtu.be/C0b3ExIoMVM) · [1-min overview](https://youtu.be/emcjmTKh6gQ)
+- ▶ Videos on YouTube (click a thumbnail to watch):
+
+| | |
+|:---:|:---:|
+| <a href="https://youtu.be/C0b3ExIoMVM"><img src="docs/images/youtube/HiCarta_youtube_thumb_4min.jpg" width="400" alt="HiCarta 4-minute demo on YouTube"></a><br>**▶ 4-min demo** | <a href="https://youtu.be/emcjmTKh6gQ"><img src="docs/images/youtube/HiCarta_youtube_thumb_1min.jpg" width="400" alt="HiCarta 1-minute overview on YouTube"></a><br>**▶ 1-min overview** |
 
 ### Configuration
 
