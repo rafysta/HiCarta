@@ -1,20 +1,20 @@
 # Usage
 
-A shortest-path operation guide you can browse by "what you want to do". For what the finer options mean, see **[Screens & controls](interface.md)**, linked from each item.
+This guide covers common tasks in HiCarta. For detailed explanations of individual controls and settings, see **[Screens & controls](interface.md)**, linked from each item.
 
-To start with, the overall flow is all you need to remember: **load data → open the map → move around to view it**. That's it.
+The basic flow is: **load data → open the map → move and zoom**.
 
 ---
 
 ## Loading data
 
-All data is loaded from the **[data catalog](data-catalog.md)** — an Excel file listing your samples, one row each — in the loader that opens when you click the **Data** button at the top of the screen (two tabs: "Data browser" and "Session").
+Data can be loaded from the **[data catalog](data-catalog.md)** — an Excel file with one row per sample. Click the **Data** button at the top of the screen to open the data loading dialog. It has three tabs (Data browser, Direct file and Session), and you can also enter the path or URL of a file directly.
 
 ### Load a Hi-C map {#load-hic}
 
 1. Click the **Data** button at the top.
-2. On the **Data browser** tab, load your catalog (**Load**; the field is pre-filled from `config.txt`, and **Browse…** picks a local `.xlsx`).
-3. Narrow the list with the sidebar filters or search, and click the sample's row.
+2. On the **Data browser** tab, load your catalog (click **Load catalog**; the field is prefilled from `config.txt`; use **Browse…** to select a local `.xlsx` file).
+3. Use the sidebar filters or search to find the desired sample, and click the sample's row.
 4. In the detail view, click **Open as contact map**.
 
 → Details: [Screens & controls - Data](interface.md#data), [Data catalog](data-catalog.md)
@@ -22,31 +22,27 @@ All data is loaded from the **[data catalog](data-catalog.md)** — an Excel fil
 ### Load a bigWig {#load-bigwig}
 
 1. In the **Data browser**, click the row of a bigWig sample.
-2. Click **Add as track**, adjust label / color / height in the dialog, and confirm.
+2. Click **Add as track**, adjust the label, color, and height in the dialog, and confirm.
 
-If a Hi-C map is already open, the track is drawn on the map's coordinates.
+If a Hi-C map is already open, the track is aligned with the genomic coordinates of the map.
 
 → Details: [Screens & controls - Tracks](interface.md#tracks)
 
 ### Tracks without a contact map {#tracks-only}
 
-You can add tracks with no Hi-C map loaded. HiCarta then **reads the chromosome
-names and lengths from the first track file you add** and shows the whole of its
-first chromosome; the contact map stays hidden.
+You can add tracks without opening a Hi-C map. HiCarta then **reads the chromosome
+names and lengths from the first track file you add** and displays the full length of the first chromosome; the contact map stays hidden.
 
-- Lengths come from the bigWig header, or from the largest coordinate found in a
-  BED / GFF3 / `*_BS.txt` file.
-- Navigate from the **Navigate** panel: pick a chromosome to jump to all of it,
-  type Start/End and press **Go to region**, pan with the left/right buttons, and
+- Chromosome lengths are obtained from the bigWig header or estimated from the maximum coordinate in a BED / GFF3 / `*_BS.txt` file.
+- Navigate from the **Navigate** panel: select a chromosome to display its full length, enter the start and end coordinates, and click **Go to region**, pan with the left/right buttons, and
   zoom with **+ / −**.
-- If the file carries no usable chromosome information, a message says so — open
-  a Hi-C map first in that case.
-- Open a Hi-C map later and the contact map appears, synced to the tracks as usual.
-- **Print** works for tracks alone (a coordinate axis plus the tracks).
+- If the file contains no usable chromosome information, HiCarta displays a message. In that case, open a Hi-C map first.
+- If you subsequently open a Hi-C map, the contact map appears and is synchronized with the tracks.
+- **Print** also supports track-only views (a coordinate axis plus the tracks).
 
 ### Load Border Strength / genes / BED {#load-bs}
 
-Like any other track: give the file a catalog row (with `file_type` = `bs`, `gff3` or `bed`, or just let the extension decide), click the row in the **Data browser**, and choose **Add as track**.
+As with other tracks, register the file in the catalog (set `file_type` to `bs`, `gff3`, or `bed`, or let HiCarta infer the type from the extension), click the row in the **Data browser**, and choose **Add as track**.
 
 Border Strength (`*_BS.txt`): positive values are drawn in red, negative values in blue, and boundaries are marked with dashed lines. For the file formats, see **[Data formats](data-formats.md)**.
 
@@ -54,21 +50,21 @@ Border Strength (`*_BS.txt`): positive values are drawn in red, negative values 
 
 ---
 
-## Moving around the region shown
+## Navigating the displayed region
 
-Navigation controls are gathered in the **Navigate** menu on the left of the screen.
+Navigation controls are available in the **Navigate** panel on the left of the screen.
 
 ### Move to any location {#goto}
 
 1. Choose **Navigate** in the top menu.
-2. Choose a **Chromosome**, and enter the range you want in **Y-axis start** and **Y-axis end** (bp).
+2. Choose a **Chromosome (X axis)**, and enter the range you want in **X-axis start** and **X-axis end** (bp). For an inter-chromosome map, also set the Y-axis chromosome and range.
 3. Click **Go to region**.
 
 → Details: [Screens & controls - Navigate](interface.md#navigate)
 
 ### Move with buttons {#pan}
 
-Use the direction pad in the **Navigate** menu (up/down/left/right plus diagonals) to move the map. The step per click is set with **Step** (¼ · ½ · 1 screen). You can also drag directly on the map, or scroll to zoom.
+Use the direction pad in the **Navigate** menu (up/down/left/right plus diagonals) to move the map. Set the movement per click using **Step** (¼ · ½ · 1 screen). You can also drag the map to pan or scroll to zoom.
 
 ![](../images/navigation.png)
 
@@ -83,10 +79,10 @@ Click the button in the center of the direction pad (⌂) in the **Navigate** me
 ### Bookmark a region of interest {#bookmark}
 
 1. Display the region you want to bookmark.
-2. If you like, enter a name in the name field at the bottom of the **Navigate** menu (optional).
+2. Optionally, enter a bookmark name in the field at the bottom of the **Navigate** panel.
 3. Click **★ Bookmark this view**.
 
-Saved bookmarks appear in a list; click one to return to that region at any time. Only the place is recorded, so clicking a bookmark while a different sample is open moves to the same region in that sample — which is what makes them useful for comparing a region of interest across samples. The normalization, resolution and color scale in force are left untouched. Remove one you no longer need with **Delete**. **Save to Excel** / **Load from Excel (append)** exchange the list as an `.xlsx` you can annotate and share ([details](data-catalog.md#bookmarks-as-excel)).
+Saved bookmarks appear in a list. Click a bookmark to return to the corresponding genomic region. Bookmarks record only genomic locations, allowing you to revisit the same region across samples. The current normalization, resolution, and color scale remain unchanged. To remove an unwanted bookmark, use **Delete**. **Save to Excel** / **Load from Excel (append)** allow you to export or import the bookmark list as an `.xlsx` file that you can annotate and share ([details](data-catalog.md#bookmarks-as-excel)).
 
 ![](../images/bookmark.png)
 
@@ -106,7 +102,7 @@ Choose **Display** in the top menu and drag the **Max value** slider to change t
 
 ### Adjust map height and layout {#layout}
 
-In **Setting** in the top menu, you can set the **Contact map height**, spread it full-screen with **Fit to window**, and adjust track heights and resolution.
+In **Setting** in the top menu, you can set the **Contact map height**, adjust the map to fit the available window height with **Fit to window**, and adjust track heights and resolution.
 
 → Details: [Screens & controls - Setting](interface.md#setting)
 
@@ -124,13 +120,13 @@ In **Setting** in the top menu, you can set the **Contact map height**, spread i
 **To restore:**
 
 1. Open the **Data** button → **Session** tab.
-2. In **Restore from file (.json)**, choose the `.json` you saved.
+2. In **Restore from file (.json)**, select the saved `.json` file and click **Load**.
 
-The data source, region, color scale and all tracks are restored together.
+The data sources, genomic region, color scale, tracks, and other saved settings are restored together. The original data files must still be accessible.
 
 → Details: [Screens & controls - Data (Session)](interface.md#data)
 
-### Export as an image / print {#print}
+### Export a figure / print {#print}
 
 1. Open the map you want to export.
 2. Choose **Print** in the top menu and click **Open print preview**.
@@ -147,6 +143,6 @@ The data source, region, color scale and all tracks are restored together.
 
 ### Switch the display language {#language}
 
-Open **Setting → Edit config file…** in the top menu, choose the **Interface language**, and click **Apply & save**. The page reloads and the language switches. Because any open map and tracks are closed when this happens, use the [session save feature](#session) if you want to return to the same state.
+Open **Setting → Edit config file…** in the top menu, choose the **Interface language**, and click **Apply & save**. The page reloads and the language switches. Because changing the language closes the currently open map and tracks, use the [session save feature](#session) if you want to return to the same state.
 
 → Details: [Screens & controls - Setting](interface.md#setting)

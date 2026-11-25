@@ -984,7 +984,11 @@ ui <- function(request) {
     "@media (min-width:768px){",
     "  #side_col > .well{position:sticky; top:8px; max-height:calc(100vh - 16px);",
     "    overflow-y:auto; overscroll-behavior:contain}}",
-    "body.ui-collapsed #main_col{width:100%; max-width:100%; flex:0 0 100%}"))),
+    "body.ui-collapsed #main_col{width:100%; max-width:100%; flex:0 0 100%}",
+    # Status boxes in the Load data dialog wrap instead of scrolling sideways:
+    # an access-denied message carries a whole s3:// path and was readable only
+    # by dragging the scrollbar (2026-11-17).
+    "#dl_status, #cat_status, #session_status{white-space:pre-wrap; word-break:break-word; overflow-x:hidden}"))),
   # Toggling is pure client-side (no Shiny round-trip) so the map and tracks are
   # never rebuilt — a synthetic window resize is enough: Leaflet re-measures via
   # trackResize and Shiny re-renders the track plots at the new width.
@@ -2409,6 +2413,15 @@ server <- function(input, output, session) {
     if (length(bad)) bad[1] else NULL
   }
 
+  # Catalog name ("disp") of a .hic path, or NULL when the path is not in the
+  # loaded catalog (direct file, session, menu dataset).
+  cat_label_for <- function(src) {
+    ch <- rv$cat_hic
+    if (is.null(src) || is.null(ch) || !nrow(ch)) return(NULL)
+    hit <- ch$disp[ch$path == src]
+    if (length(hit) && nzchar(hit[1])) hit[1] else NULL
+  }
+
   # Open a .hic and render it. All parameters default to the current inputs, but
   # can be passed explicitly (used by session restore and the catalog, which
   # must not depend on asynchronous input updates).
@@ -2621,13 +2634,18 @@ server <- function(input, output, session) {
       rv$chr_y <- chr_y; rv$chrlen_y <- chrlen_y   # Y axis
       rv$trans <- trans
       rv$genome <- gen                             # NULL unless genome-wide
+      prev_src  <- rv$open_src; prev_name <- rv$sample_name
       rv$open_key <- paste(paste(srcs, collapse = "|"), chr, chr_y)
       rv$open_src <- paste(srcs, collapse = "|")   # for keep_display above
-      # human-readable name of the sample now on screen: local file -> basename;
-      # menu dataset -> "sample label / dataset label" looked up in the menu.
+      # human-readable name of the sample now on screen. A re-open of the same
+      # dataset (other chromosome, whole genome, bookmark) passes no name, so
+      # keep the one already shown; otherwise look the path up in the catalog
+      # and fall back to the file name.
       rv$sample_name <- {
         if (!is.null(name) && nzchar(name)) name          # from the catalog
-        else basename(srcs[1])
+        else if (!is.null(prev_name) && nzchar(prev_name) &&
+                 identical(prev_src, rv$open_src)) prev_name
+        else cat_label_for(srcs[1]) %||% basename(srcs[1])
       }
       # Reference bin size the value scale is expressed in. Every tile scales
       # vmin/vmax by (res/vref)^2, so one "max value" means one brightness
@@ -3036,14 +3054,7 @@ server <- function(input, output, session) {
       rv$bfac_auto <- bf; rv$bfac <- bf
       rv$sample_name_b <- {
         if (!is.null(name) && nzchar(name)) name          # from the catalog
-        else {
-          lbl <- NULL
-          if (!is.null(rv$cat_hic) && nrow(rv$cat_hic) > 0) {
-            hit <- rv$cat_hic[rv$cat_hic$path == src, , drop = FALSE]
-            if (nrow(hit) > 0) lbl <- hit$disp[1]
-          }
-          if (is.null(lbl)) basename(src) else lbl
-        }
+        else cat_label_for(src) %||% basename(src)
       }
       # Narrow the resolution list to what BOTH files offer, so every tile reads
       # A and B at exactly the same bin size. rv$res_all_a keeps A's own list for

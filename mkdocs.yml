@@ -9,6 +9,8 @@ docs_dir: docs
 theme:
   name: material
   language: en
+  logo: images/logo/hicarta-logo-mark.png
+  favicon: images/logo/favicon-32.png
   features:
     - navigation.top
     - navigation.sections
@@ -35,14 +37,23 @@ theme:
 # are set via nav_translations under the ja locale below.
 nav:
   - Home: en/index.md
-  - Installation: en/install.md
+  - Get started:
+      - Installation: en/install.md
+      - First 5 minutes: en/first-5-minutes.md
   - What HiCarta can do: en/features.md
-  - Usage: en/usage.md
-  - Screens & controls: en/interface.md
-  - Data catalog: en/data-catalog.md
-  - Data formats: en/data-formats.md
-  - Plugins: en/plugins.md
-  - Setup & troubleshooting: en/setup-details.md
+  - Tutorials:
+      - Compare two conditions: en/tutorial-compare.md
+      - Make a publication figure: en/tutorial-figure.md
+  - Reference:
+      - Usage: en/usage.md
+      - Screens & controls: en/interface.md
+      - Data catalog: en/data-catalog.md
+      - Data formats: en/data-formats.md
+      - Plugins: en/plugins.md
+      - How HiCarta works: en/how-it-works.md
+      - Setup & troubleshooting: en/setup-details.md
+  - Comparison with other tools: en/comparison.md
+  - Demo data: en/demo-data.md
 
 markdown_extensions:
   - admonition
@@ -85,3 +96,12 @@ plugins:
             Data formats: データ形式
             Plugins: プラグイン
             Setup & troubleshooting: セットアップ詳細・トラブルシューティング
+            Get started: はじめに
+            First 5 minutes: はじめての 5 分
+            Tutorials: チュートリアル
+            Compare two conditions: 2 つの条件を比較する
+            Make a publication figure: 論文用の図を作る
+            Reference: リファレンス
+            How HiCarta works: HiCarta のしくみ
+            Comparison with other tools: 他のツールとの比較
+            Demo data: デモデータ

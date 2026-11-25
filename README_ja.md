@@ -1,84 +1,171 @@
-# HiCarta（旧 HiD contact viewer）
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo/hicarta-logo-wordmark-dark.png">
+    <img src="docs/images/logo/hicarta-logo-wordmark.png" alt="HiCarta" width="420">
+  </picture>
+</p>
 
-> English: see [README.md](README.md)。詳細ガイド（オンライン）: <https://rafysta.github.io/HiCarta/>
+<h3 align="center">Hi-C マップを、地図アプリのように</h3>
 
-R + Shiny + Leaflet で実装した、対話的な Hi-C contact map ビューアです。地図アプリのようにドラッグで移動・スクロールでズームでき、高解像度・大きなゲノムにも対応します。旧 Java 版(テキスト全読み込みで破綻)の作り直しで、`.hic` を中心に複数形式を扱えます。データは **Excel のデータカタログ**（1 行 = 1 サンプル）で管理し、アプリ内では絞り込み・検索のできるサンプルブラウザとして表示されます。
+<p align="center">
+HiCarta は、Hi-C データを可視化する無料のデスクトップアプリです。複数の染色体を俯瞰するスケールから個々の遺伝子のスケールまで、ドラッグとスクロールで自由に移動・拡大・縮小できます。
+ループや ChIP-seq などのトラックの同時表示、異なる条件の Hi-C マップの比較、R による独自の描画機能の追加、論文用の編集可能な図の出力にも対応しています。
+お使いの PC 上で動作し、専用サーバーの構築は不要です。R をインストールしておけば、ダブルクリックで起動できます。
+</p>
 
-## 動作の考え方（タイル方式）
+<p align="center">
+  <a href="https://rafysta.github.io/HiCarta/ja/"><b>📖 ドキュメント</b></a> ·
+  <a href="https://youtu.be/C0b3ExIoMVM"><b>▶ 4 分のデモ</b></a> ·
+  <a href="https://youtu.be/emcjmTKh6gQ"><b>▶ 1 分の紹介</b></a> ·
+  <a href="#5-分で試す"><b>⬇ 試す</b></a> ·
+  <a href="README.md">English</a>
+</p>
 
-染色体を丸ごと読むのではなく、地図タイルと同じ方式で表示します。Leaflet の `GridLayer` が**見えているタイルだけ**を要求し、遠いタイルは自動で破棄します。各タイル（256px）は、現在のズームに合った `.hic` 解像度でその 2 次元ブロックだけを読み、R が PNG にして配信します（`session$registerDataObj` によるオンデマンド配信）。ズームに応じて解像度が自動で切り替わります（LOD）。座標系は**左上が原点**（y は下方向に増加）。
+https://github.com/user-attachments/assets/47df57ce-7c26-4497-b3c2-2df7bcc8d8ce
 
-色は継ぎ目が出ないよう、全タイル共通の**絶対値スケール（Value の Max）**を使います。初期値は Open 時に粗い解像度で全体を一度読み、その分布から決めます。Display の Max を変えると全タイルが再描画されます。
+## 可視化の例
 
-リモートの `.hic` や bigWig は、既定では **HTTP レンジリクエストでストリーミング**され、見えている部分のバイトだけを取得します。`config.txt` で `hic_engine = download` にすると、ファイル全体を一度 `_hic_cache/` にダウンロードしてから読みます。
+|                                                                                                   |                                                                                                           |                                                                                                    |
+| :-----------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------: |
+| <img src="docs/images/gallery/gal_1_map_thumb.jpg" width="260"><br>**Hi-C マップ** | <img src="docs/images/gallery/gal_2_compare_thumb.jpg" width="260"><br>**2 条件の Hi-C マップの比較（右上と左下に分割表示）** | <img src="docs/images/gallery/gal_3_rotmap_loops_thumb.jpg" width="260"><br>**回転マップ＋ループ＋ChIP-seq** |
+| <img src="docs/images/gallery/gal_4_tracks_genes_thumb.jpg" width="260"><br>**ChIP-seq トラック＋遺伝子** | <img src="docs/images/gallery/gal_5_plugin_v4c_thumb.jpg" width="260"><br>**R によるカスタムトラック** | <img src="docs/images/gallery/gal_6_wholegenome_thumb.jpg" width="260"><br>**複数の染色体を同時表示** |
 
-## ファイル構成
+上の図はすべて HiCarta から PDF として出力したものです。
 
-```
-app.R                  本体（Shiny UI + Leaflet + タイル配信）
-HiCarta_catalog_template.xlsx  データカタログのテンプレート
-R/catalog.R            Excel データカタログ（.xlsx）：読み込み・検証・フィルタ
-R/bookmarks.R          ブックマークの .xlsx 入出力
-R/hic_reader.R         純 R の .hic リーダー（HTTP レンジストリーミング）
-R/bigwig_reader.R      純 R の bigWig リーダー（HTTP レンジストリーミング）
-R/readers.R            エンジン選択＋領域行列＋キャッシュ
-R/tiles.R              タイル描画（(z,x,y)→領域→PNG）
-R/draw.R               カラー化（パレット・値スケール）と PNG ラスタ生成
-R/tracks.R             トラック描画。旧 IGV XML パーサ
-R/genes.R              遺伝子トラック（GFF3）
-R/borderstrength.R     Border Strength トラック（*_BS.txt）
-R/chrominfo.R          トラックファイルから染色体名・長さを取得（マップなし表示用）
-R/juicer_menu.R        旧 Juicer メニューのパーサ（変換スクリプト用）
-R/i18n.R               画面の文言（英語・日本語）
-R/install_libraries.R  必要パッケージのインストール
-config.txt             起動時の既定値
-run_windows.bat / run_mac.command  ランチャー
-scripts/               変換スクリプト（カタログ⇔旧形式、hic200→.hic など）
-plugins/               プラグインの例（virtual 4C、chr/start/end/value の表）。R で独自トラックを追加できる → docs/plugins.md
-docs/                  ドキュメント原稿（GitHub Pages / MkDocs で公開）
-mkdocs.yml             ドキュメントサイト設定
-.github/workflows/     サイトの自動ビルド・公開
-sample/                動作確認用データ
-```
+---
 
-## 設定ファイル（config.txt）
+## 特徴
 
-`config.example.txt` を **`config.txt`** にコピーし（app.R と同じフォルダ）、自分の値を記入して再起動します。`config.txt` は **git 管理外**なので、データURLがコミットされることはありません。`config.txt` が無くてもアプリは動作します（Data browser でカタログを手で読み込むだけです）。以下はすべてアプリ内の **設定 → 設定ファイルを編集…** からも変更できます。
+### 🗺 地図アプリのように直感的に操作する
+ドラッグで表示領域を移動し、スクロールで拡大・縮小できます。解像度は拡大率に応じて自動的に切り替わり、染色体全体から数 kb の領域までシームレスに閲覧できます。ブックマークを使えば、登録したゲノム領域に 1 クリックで戻れます。
 
-```
-catalog_url = <データカタログ .xlsx の URL かローカルパス>  # Data browser の既定カタログ
-language    = ja      # 画面の言語（en=英語[既定] / ja=日本語）
-hic_engine  = native  # リモートファイル: native=ストリーミング / download=全体を先に取得
-igv_genome  =         # 「IGV で開く」で送るゲノム ID（例: hg38。空欄なら送らない）
-```
+### ⚖ 異なる条件の Hi-C マップを比較する
+2 つ目のサンプルを開くと、異なる条件の Hi-C マップを同一画面上で比較できます。比較方法は、**split**（対角線を境に右上と左下に分割表示）、**curtain**（境界をドラッグして表示範囲を切り替え）、**difference**（2 つのマップの比または差を可視化）の 3 種類です。サンプル間のリード数の違いは自動的に補正されます。
 
-`language` は起動時に一度だけ読まれます。既定は英語（`en`）で、`config.txt` に `language = ja` を書くとインターフェース全体が日本語になります。言語の追加は `R/i18n.R` に定義を足すだけです。
+https://github.com/user-attachments/assets/87f08e95-5248-490c-91ee-6eff22e37a78
 
-旧形式（Juicer 形式メニュー、IGV トラックリスト XML）は `scripts/` のスクリプトでカタログと相互変換できます（[scripts/README.md](scripts/README.md) 参照）。
+### 📚 Hi-C マップとさまざまなゲノムデータを同時に表示する
+Hi-C マップを 45 度回転させた三角形のトラックとして表示し、ループ（弧）、ChIP-seq などのシグナル（bigWig）、ゲノム区間（BED）、遺伝子（GFF3）、ドメイン境界強度（Border Strength）と並べて表示できます。各トラックの表示位置は Hi-C マップと連動するため、同じゲノム領域の情報を比較できます。通常の正方形の Hi-C マップでも、これらのデータを組み合わせて表示できます。
 
-## 使い方
+https://github.com/user-attachments/assets/3e54be2d-4703-459c-b483-4d1128d5bb6c
 
-1. R をインストール（https://cran.r-project.org ）。
-2. `run_windows.bat`（Windows）または `run_mac.command`（macOS）を実行。初回のみ必要パッケージを自動導入します（bigWig 用の rtracklayer は数分）。
-3. 上部メニュー（データ / 移動 / 表示 / 印刷 / 設定 / 情報）で操作パネルを切替。
-4. **データ**: カタログ（`.xlsx`。テンプレートは `HiCarta_catalog_template.xlsx`）を読み込み、サンプルの行をクリック → 「コンタクトマップとして開く」。
-5. **移動**: 染色体と範囲の指定・方向パッドでの移動・ブックマーク。
-6. マップ上ではドラッグで移動、スクロールでズーム、中クリックのドラッグで矩形ズーム。上部に座標・現在解像度、端にルーラーを表示します。
+### 📋 Excel ファイル 1 つでサンプルを管理する
+専用のデータベースを構築する必要はありません。Excel に 1 行につき 1 ファイルの情報を記載するだけで、データカタログを作成できます。細胞種、実験条件、抗体などの項目は、列として自由に追加できます。追加した項目は HiCarta の絞り込み機能に反映されるため、数百のサンプルから目的のデータを数クリックで探し出せます。同じ Excel ファイルを共同研究者と共有すれば、共通のデータカタログを利用できます。Excel ファイルはローカル環境からもオンラインからも読み込めます。
 
-## トラック
+<img src="docs/images/illustrations/hicarta-spreadsheet-to-app.png" width="600" alt="Excel に記載したファイルの一覧が、HiCarta で絞り込み可能なデータカタログになる">
 
-カタログのトラック行（bigWig / BED / GFF3 / `*_BS.txt`）から「トラックとして追加」で、各種 1D トラックを contact map の下に追加できます（マップの横方向のパン/ズームに連動、複数可、色・高さ調整可、カーソルの縦線がトラックまで貫通）。並び替えや設定変更は「表示 → トラック」のチップから行います。
+### 🔒 未発表データを安全に共有する
+HiCarta は、ローカル環境やクラウド環境からのデータの読み込みに対応しており、Amazon S3 のアクセス制御を利用して未発表データを共同研究者と共有できます。
+Amazon S3 に保存したファイルにアクセス制御用のタグを付け、タグに応じたアクセス権限を設定することで、許可されたユーザーだけがファイルを閲覧できるようにします。あらかじめアクセス権限を設定しておけば、論文の公開時などに共有範囲を広げたい場合も、タグを変更するだけで対応できます。ファイルを移動する必要はなく、Excel に記載したファイルのパスもそのまま利用できます。
 
-Hi-C マップを開かずに**トラックだけ**表示することもできます。その場合は最初に追加したトラックのファイルから染色体名・長さを読み取り（bigWig はヘッダ、BED / GFF3 / `*_BS.txt` はデータ中の最大座標）、最初の染色体の全長を表示します。移動は「移動」パネル（染色体選択・領域指定・左右パン・拡大/縮小ボタン）や、トラック上部の座標ルーラーの範囲ドラッグで行います。
+<img src="docs/images/illustrations/hicarta-access-permissions.png" width="600" alt="lab、group、public のタグを付けたファイルを、許可されたタグの分だけ開ける">
 
-- **bigWig / BED**: bigWig は塗りつぶしエリア、BED は区間ボックス。表示範囲だけを rtracklayer で読み込み（rtracklayer は Bioconductor、初回自動導入）。
-- **gene (GFF3)**: 遺伝子を位置・向き（矢印）・名前で表示。+鎖=上段／−鎖=下段。ズームインで exon（CDS 太・UTR 細）。名前は重ならないよう解像度に応じて間引き。初回に `<gff3>.genes.rds` をキャッシュ。
-- **Border Strength**: BorderStrength（github.com/rafysta/BorderStrength）の `*_BS.txt` の BS.norm を面グラフ（正=赤・負=青、基準線0）で描き、boundary に点線。
+### 🧩 R で独自の描画機能を追加する
+HiCarta が標準で提供する描画機能に加え、R で独自のトラックを作成できます。
+プラグインの作成に必要なのは、`read()` と `draw()` の 2 つの関数を記述した R スクリプトファイル 1 つだけです。このファイルを `plugins/` フォルダに置くと、新しい種類のトラックとして利用でき、プラグイン用の設定画面も自動的に生成されます。実装例として、virtual 4C のプラグインを同梱しています。
 
-## hic200-cpp の生マップ → .hic に変換
+https://github.com/user-attachments/assets/6d7d85dc-6bde-43dd-812e-6701cef4681b
 
-hic200-cpp の `.txt.gz` は、あらかじめ **`.hic` に変換**してからカタログの行として読み込みます（`.hic` は圧縮＋インデックス＋多解像度で軽い）。付属の `scripts/convert_hic200_to_hic.sh` で変換できます（Java と juicer_tools.jar、`sample/bin_def_200bp.txt` などの bin 定義が必要）。詳細は [docs/data-formats.md](docs/data-formats.md) を参照。
+### 🖨 論文用の編集可能な図を出力する
+印刷プレビューで出力イメージを確認しながら、図に含める要素を細かく調整できます。PDF 出力では、Hi-C マップをラスター画像として、軸・ラベル・トラックなどを編集可能なベクター形式で保存します。これにより、ファイルサイズを抑えながら、Illustrator や Inkscape などで編集可能な、論文用の高品質な図を作成できます。
 
-## 備考
+### 🌐 既存のデータファイルをそのまま利用する
+`.hic` ファイルや各種トラックのデータを、ローカルの PC、Web サーバー、Dropbox の共有リンク、Amazon S3（公開・非公開）から開けます。リモートファイルは必要な部分だけを読み込むため、事前にファイル全体をダウンロードする必要はありません。
 
-現状は cis（同一染色体内）を対象にした実装です。染色体名は `.hic` と同じ `I/II/III` を想定し、トラック側の `chrII` 等は自動吸収を試みます。作者: Hideki Tanizawa (rafysta@gmail.com)。
+<img src="docs/images/illustrations/hicarta-data-sources.png" width="600" alt="PC 上の HiCarta が、ローカル、Amazon S3、Web サーバー、Dropbox のファイルを読む">
+
+---
+
+## 高速で快適な操作を支える仕組み
+
+HiCarta は、Web 地図アプリと同様にタイルベースの描画方式を採用しています。表示領域を小さな矩形のタイルに分割し、画面中央のタイルを優先して描画します。タイルごとに `.hic` ファイルや bigWig ファイルから必要な部分だけを読み込むため、Web サーバーやクラウド上の大容量ファイルも、全体をダウンロードせずに閲覧できます。また、接続を再利用し、読み込み済みのデータをメモリにキャッシュすることで、一度閲覧した領域に戻る際にも高速に表示できます。通信速度が遅い環境向けに、ファイルをローカルに保存してから描画するモードも用意しています。
+
+データの読み込みと描画処理は、お使いの PC 上で R が行います。Web ブラウザはユーザーインターフェースとして使用するため、専用のサーバーを別途用意する必要はありません。
+
+---
+
+## 5 分で試す
+
+1. **R をインストール**（バージョン 4.1 以上）: <https://cran.r-project.org>
+2. **HiCarta をダウンロード**: [ZIP](https://github.com/rafysta/HiCarta/archive/refs/heads/main.zip)（または `git clone https://github.com/rafysta/HiCarta.git`）
+3. **起動**:
+   - **Windows** — `run_windows.bat` をダブルクリック
+   - **macOS** — `run_mac.command` をダブルクリック（起動がブロックされた場合は右クリック → 開く）
+
+   初回起動時は必要な R パッケージが自動的にインストールされるため、数分かかることがあります。インストールが完了すると、Web ブラウザで HiCarta が起動します。
+4. **デモデータを開く**: **Data** を開き、カタログの入力欄に以下の URL を貼り付けて **Load** をクリックします。
+
+   ```
+   https://uo-cgf.s3.us-west-2.amazonaws.com/HiCarta/demo/HiCarta_demo_catalog.xlsx
+   ```
+
+   一覧からサンプルをクリックすると、データを閲覧できます。デモでは、ヒト IMR90 細胞と分裂酵母の公開データを使用しています（詳細は [デモデータ](#デモデータ) を参照）。
+
+ご自身のデータを利用する場合は、[`sample/HiCarta_catalog_template.xlsx`](sample/) をコピーし、1 行につき 1 ファイルの情報を記載してください。詳細は [インストール](https://rafysta.github.io/HiCarta/ja/install/) と [データカタログ](https://rafysta.github.io/HiCarta/ja/data-catalog/) を参照してください。
+
+---
+
+## 他のツールとの比較
+
+各ツールにはそれぞれ異なる特徴があります。HiCarta は、研究室で保有するデータを手元の PC で手軽に閲覧・比較し、その結果を論文用の図として出力することを重視しています。
+
+|                    | HiCarta | Juicebox |    HiGlass    |   JBrowse 2   |
+| ------------------ | :-----: | :------: | :-----------: | :-----------: |
+| 専用サーバーの構築が不要       |    ✓    |    ✓     |  –（サーバーが必要）   | ✓（Desktop 版）  |
+| Hi-C、トラック、ループの同時表示 |    ✓    |    ✓     |       ✓       |       ✓       |
+| 2 つの Hi-C マップの比較   |    ✓    |    ✓     |       ✓       |       ✓       |
+| R によるカスタム描画機能の追加   |    ✓    |    –     | –（JavaScript） | –（JavaScript） |
+| Excel によるサンプル管理    |    ✓    |    –     |       –       |       –       |
+| 非公開データの共有機能        |    ✓    |    –     | △（サーバーの設定による） |       △       |
+
+2026 年 11 月時点の各ツールのドキュメントに基づく比較です。
+
+---
+
+## 対応データ形式
+
+| データ | 形式 | 備考 |
+|---|---|---|
+| コンタクトマップ | `.hic`（Juicer） | 複数解像度、KR／ICE／raw、ローカル・リモート対応 |
+| シグナル | bigWig | ローカル・リモート対応 |
+| ゲノム区間 | BED | |
+| 遺伝子 | GFF3 | |
+| ループ・相互作用 | BEDPE、HiCCUPS のループ一覧、ChIA-PET／HiChIP の表 | 弧として描画 |
+| ドメイン境界強度 | Border Strength（`*_BS.txt`） | |
+| その他 | 自作プラグイン（R） | [プラグイン](https://rafysta.github.io/HiCarta/ja/plugins/) を参照 |
+
+**対応予定:** `.cool`／`.mcool` ファイルの読み込み、プラグインでの `ggplot2` の利用。
+
+---
+
+## ドキュメントと動画
+
+- 📖 **ドキュメント: <https://rafysta.github.io/HiCarta/ja/>**
+  - [インストール](https://rafysta.github.io/HiCarta/ja/install/) · [使い方](https://rafysta.github.io/HiCarta/ja/usage/) · [機能](https://rafysta.github.io/HiCarta/ja/features/)
+  - [データカタログ（Excel）](https://rafysta.github.io/HiCarta/ja/data-catalog/) · [データ形式](https://rafysta.github.io/HiCarta/ja/data-formats/) · [プラグイン](https://rafysta.github.io/HiCarta/ja/plugins/)
+  - [セットアップの詳細とトラブルシューティング](https://rafysta.github.io/HiCarta/ja/setup-details/)
+- ▶ 動画: [4 分のデモ](https://youtu.be/C0b3ExIoMVM) · [1 分の紹介](https://youtu.be/emcjmTKh6gQ)
+
+### 設定
+
+起動時の設定は `config.txt` から読み込まれます（`config.example.txt` をコピーして作成してください）。既定のデータカタログ、表示言語（`en`／`ja`）、リモートファイルの読み込み方法などを設定できます。アプリの **Setting → Edit config file…** からも編集できます。詳細は [セットアップの詳細](https://rafysta.github.io/HiCarta/ja/setup-details/) を参照してください。
+
+---
+
+## デモデータ
+
+デモカタログのデータはすべて公開データです。
+
+- IMR90 細胞の Hi-C（増殖細胞およびがん遺伝子誘導性老化細胞）と CTCF／SMC1／Pol II の ChIP-seq — Iwasaki *et al.*, *Nat Commun* 2019（[GEO GSE118494](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE118494)）。Hi-C マップは GEO に登録されたサンプルのみを用いて作成しています。
+- IMR90 細胞の高深度 Hi-C データとループ（HiCCUPS）— Rao *et al.*, *Cell* 2014（[GEO GSE63525](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE63525)）。
+- 分裂酵母の G2 期および分裂期の Hi-C — Tanizawa *et al.*, *Nat Struct Mol Biol* 2017（[GEO GSE93198](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE93198)）。
+- 遺伝子アノテーション — GENCODE v19（ヒト）、PomBase（分裂酵母）。
+
+---
+
+## 要望・引用・ライセンス
+
+- **質問・不具合報告・機能のご要望:** [GitHub Issues](https://github.com/rafysta/HiCarta/issues) からお知らせください。HiCarta が研究のお役に立ちましたら、GitHub で ⭐（Star）を付けていただけると、より多くの研究者に知っていただくきっかけになります。
+- **引用:** HiCarta の論文が公開されるまでは、以下の形式で本リポジトリを引用してください: Tanizawa H. *HiCarta: an interactive Hi-C viewer.* https://github.com/rafysta/HiCarta (2026).
+- **開発者:** 谷澤英樹（<rafysta@gmail.com>）、北海道大学 遺伝子病制御研究所
+- **ライセンス:** [MIT](LICENSE)
